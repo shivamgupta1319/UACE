@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.1.2
+
+- "Copy MCP Config" now produces a **portable** setup guide with no machine-specific paths,
+  including a proper Cursor walkthrough (one-time engine pre-build to avoid the MCP
+  startup-timeout / native-build issue) and troubleshooting for `npx`/global install.
+
 ## 0.1.1
 
 - "Copy MCP Config" now generates portable `npx -y uace-mcp` config (no machine-specific

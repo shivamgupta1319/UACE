@@ -327,64 +327,72 @@ export function activate(context: vscode.ExtensionContext): void {
   void init(context, provider, mcp);
 }
 
-/** Generate ready-to-paste MCP config for Claude Code and Cursor. */
+/** Generate a portable, machine-independent setup guide for other AI tools. */
 async function copyMcpConfig(): Promise<void> {
-  if (!runtime || !serverEntry) {
-    vscode.window.showWarningMessage(`UACE: not ready yet — ${startupMessage}`);
-    return;
-  }
-  const node = runtime.node;
-  const server = serverEntry;
-  // Portable config (works on any machine — no local paths).
-  const claudeNpx = `claude mcp add uace --scope user -- npx -y uace-mcp`;
-  const cursorNpx = JSON.stringify(
+  const claudeCmd = `claude mcp add uace --scope user -- npx -y uace-mcp`;
+  const cursorJson = JSON.stringify(
     { mcpServers: { uace: { command: "npx", args: ["-y", "uace-mcp"] } } },
-    null,
-    2
-  );
-  // Fallback for environments where `npx` isn't on PATH (e.g. GUI apps + nvm).
-  const claudeAbs = `claude mcp add uace --scope user -- "${node}" "${server}"`;
-  const cursorAbs = JSON.stringify(
-    { mcpServers: { uace: { command: node, args: [server] } } },
     null,
     2
   );
   const doc = `# Connect UACE to other AI tools
 
-\`uace-mcp\` is on npm, so any MCP-capable tool can share this project memory with **no local paths**. All tools read/write the same database (\`~/.uace/memory.db\`).
+\`uace-mcp\` runs locally and is published on npm, so any MCP-capable tool can share this
+project's memory. Every tool reads/writes the same database (\`~/.uace/memory.db\`).
 
-## Claude Code (recommended)
-
-\`\`\`bash
-${claudeNpx}
-\`\`\`
-
-## Cursor (recommended) — add to \`~/.cursor/mcp.json\`
-
-\`\`\`json
-${cursorNpx}
-\`\`\`
-
-Reload the tool afterward.
+**Requirement:** Node.js installed (the engine runs on it).
 
 ---
 
-### If \`npx\` isn't found (some GUI apps don't inherit nvm/fnm PATH)
-
-Use absolute paths to *this* machine's Node + engine instead:
+## Claude Code  (easiest)
 
 \`\`\`bash
-${claudeAbs}
+${claudeCmd}
 \`\`\`
 
-\`\`\`json
-${cursorAbs}
+Reload Claude Code. Done.
+
+---
+
+## Cursor
+
+Cursor has a short MCP startup timeout. The very first run downloads + builds the engine,
+which can take longer than that timeout — so **build it once up front**, then add the config.
+
+**1. One-time: pre-build the engine in a terminal**
+
+\`\`\`bash
+npx -y uace-mcp
 \`\`\`
+
+Wait until you see \`[uace] MCP server ready\`, then press **Ctrl+C**.
+(Takes ~30s–2 min the first time; instant afterwards.)
+
+**2. Add to \`~/.cursor/mcp.json\`** (merge with any existing servers)
+
+\`\`\`json
+${cursorJson}
+\`\`\`
+
+**3. Reload Cursor** — Settings → MCP → toggle the \`uace\` server off/on (or restart).
+It should show a green dot with the tools listed.
+
+---
+
+### Troubleshooting
+
+- **"Connection closed" / bindings error in Cursor** → the first-run build was cut off.
+  Do step 1 above (pre-build in a terminal), then reload.
+- **\`npx\` not found** → install the engine globally and use it directly:
+  \`\`\`bash
+  npm install -g uace-mcp
+  \`\`\`
+  then set \`"command": "uace-mcp", "args": []\` in the config above.
 `;
-  await vscode.env.clipboard.writeText(claudeNpx);
+  await vscode.env.clipboard.writeText(claudeCmd);
   const editor = await vscode.workspace.openTextDocument({ content: doc, language: "markdown" });
   await vscode.window.showTextDocument(editor, { preview: false });
-  vscode.window.showInformationMessage("UACE: Claude Code command copied to clipboard.");
+  vscode.window.showInformationMessage("UACE: setup guide opened; Claude Code command copied to clipboard.");
 }
 
 export function deactivate(): void {

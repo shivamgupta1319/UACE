@@ -9,3 +9,6 @@ out/
 *.db-wal
 *.db-shm
 .uace/
+
+# scratch output from the "Copy MCP Config" command
+Connect UACE to other AI tools.md
