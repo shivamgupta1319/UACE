@@ -1,6 +1,6 @@
 # UACE — AI Memory (VS Code extension)
 
-A sidebar dashboard for the [Universal AI Context Engine](../README.md). It shows
+A sidebar dashboard for the **Universal AI Context Engine** (UACE). It shows
 your project's shared AI memory — layered memories, recent sessions, active files,
 and commits — and lets you save/continue sessions from the editor.
 
