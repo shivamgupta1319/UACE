@@ -5,10 +5,10 @@
   "type": "module",
   "license": "MIT",
   "author": "shivamgupta1319",
-  "homepage": "https://github.com/shivamgupta1319/uace#readme",
+  "homepage": "https://github.com/shivamgupta1319/UACE#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/shivamgupta1319/uace.git"
+    "url": "git+https://github.com/shivamgupta1319/UACE.git"
   },
   "keywords": [
     "mcp",

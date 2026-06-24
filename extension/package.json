@@ -8,9 +8,9 @@
   "icon": "media/icon.png",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/shivamgupta1319/uace.git"
+    "url": "git+https://github.com/shivamgupta1319/UACE.git"
   },
-  "homepage": "https://github.com/shivamgupta1319/uace#readme",
+  "homepage": "https://github.com/shivamgupta1319/UACE#readme",
   "engines": {
     "vscode": "^1.101.0"
   },
