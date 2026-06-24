@@ -335,33 +335,53 @@ async function copyMcpConfig(): Promise<void> {
   }
   const node = runtime.node;
   const server = serverEntry;
-  const claudeCmd = `claude mcp add uace --scope user -- "${node}" "${server}"`;
-  const cursorJson = JSON.stringify(
+  // Portable config (works on any machine — no local paths).
+  const claudeNpx = `claude mcp add uace --scope user -- npx -y uace-mcp`;
+  const cursorNpx = JSON.stringify(
+    { mcpServers: { uace: { command: "npx", args: ["-y", "uace-mcp"] } } },
+    null,
+    2
+  );
+  // Fallback for environments where `npx` isn't on PATH (e.g. GUI apps + nvm).
+  const claudeAbs = `claude mcp add uace --scope user -- "${node}" "${server}"`;
+  const cursorAbs = JSON.stringify(
     { mcpServers: { uace: { command: node, args: [server] } } },
     null,
     2
   );
   const doc = `# Connect UACE to other AI tools
 
-Your local UACE server lets any MCP-capable AI tool share the same project memory.
+\`uace-mcp\` is on npm, so any MCP-capable tool can share this project memory with **no local paths**. All tools read/write the same database (\`~/.uace/memory.db\`).
 
-## Claude Code
-Run this once (available in every project):
+## Claude Code (recommended)
 
 \`\`\`bash
-${claudeCmd}
+${claudeNpx}
 \`\`\`
 
-## Cursor
-Add to \`~/.cursor/mcp.json\` (merge with any existing servers):
+## Cursor (recommended) — add to \`~/.cursor/mcp.json\`
 
 \`\`\`json
-${cursorJson}
+${cursorNpx}
 \`\`\`
 
-Then reload the tool. It will read/write the same memory as VS Code.
+Reload the tool afterward.
+
+---
+
+### If \`npx\` isn't found (some GUI apps don't inherit nvm/fnm PATH)
+
+Use absolute paths to *this* machine's Node + engine instead:
+
+\`\`\`bash
+${claudeAbs}
+\`\`\`
+
+\`\`\`json
+${cursorAbs}
+\`\`\`
 `;
-  await vscode.env.clipboard.writeText(claudeCmd);
+  await vscode.env.clipboard.writeText(claudeNpx);
   const editor = await vscode.workspace.openTextDocument({ content: doc, language: "markdown" });
   await vscode.window.showTextDocument(editor, { preview: false });
   vscode.window.showInformationMessage("UACE: Claude Code command copied to clipboard.");

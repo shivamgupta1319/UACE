@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.1.1
+
+- "Copy MCP Config" now generates portable `npx -y uace-mcp` config (no machine-specific
+  paths) for Claude Code / Cursor, with an absolute-path fallback for environments where
+  `npx` isn't on PATH.
+
 ## 0.1.0
 
 Initial release.
