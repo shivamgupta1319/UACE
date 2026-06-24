@@ -2,7 +2,7 @@
   "name": "uace-dashboard",
   "displayName": "UACE — AI Memory",
   "description": "Sidebar dashboard for the Universal AI Context Engine: see your project's shared AI memory, sessions, active files and commits.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "shivamgupta1319",
   "license": "MIT",
   "icon": "media/icon.png",

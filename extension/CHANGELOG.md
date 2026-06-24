@@ -1,5 +1,12 @@
 # Change Log
 
+## 0.1.3
+
+- Installs `uace-mcp@0.1.1`, which uses a prebuilt `better-sqlite3` (Node 24) instead of
+  compiling from source. First-run engine setup drops from minutes to seconds and no
+  longer trips MCP startup timeouts (the cause of the Cursor "bindings"/connection-closed
+  error).
+
 ## 0.1.2
 
 - "Copy MCP Config" now produces a **portable** setup guide with no machine-specific paths,
