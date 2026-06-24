@@ -1,17 +1,45 @@
 {
-  "name": "uace",
+  "name": "uace-mcp",
   "version": "0.1.0",
-  "private": true,
   "description": "Universal AI Context Engine — local-first shared project memory served to any MCP-capable AI assistant.",
   "type": "module",
+  "license": "MIT",
+  "author": "shivamgupta1319",
+  "homepage": "https://github.com/shivamgupta1319/uace#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shivamgupta1319/uace.git"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ai",
+    "memory",
+    "context",
+    "claude",
+    "cursor",
+    "copilot",
+    "embeddings",
+    "local-first"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "bin": {
     "uace-mcp": "dist/server.js"
   },
+  "main": "dist/server.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/server.ts",
     "start": "node dist/server.js",
-    "smoke": "tsx scripts/smoke.ts"
+    "smoke": "tsx scripts/smoke.ts",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",

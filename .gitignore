@@ -2,6 +2,7 @@ node_modules/
 dist/
 out/
 *.vsix
+*.tgz
 *.log
 # local memory databases
 *.db
