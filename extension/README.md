@@ -1,58 +1,67 @@
-# UACE — AI Memory (VS Code extension)
+# UACE — AI Memory
 
-A sidebar dashboard for the **Universal AI Context Engine** (UACE). It shows
-your project's shared AI memory — layered memories, recent sessions, active files,
-and commits — and lets you save/continue sessions from the editor.
+**Persistent, shared project memory for your AI coding assistants.** Open a new AI
+session and keep going — no re-explaining your architecture, decisions, or progress.
 
-It connects to the UACE MCP server as a client (spawning `node dist/server.js` over
-stdio), so there are **no native modules in the extension host** and nothing extra
-to rebuild. It reads the same `~/.uace/memory.db` every AI tool writes to.
+UACE gives Claude Code, Cursor, VS Code Copilot, and any other MCP-capable tool **one
+shared "Project Brain"** for each project: architecture and standards, current task and
+TODOs, recent sessions, git history, and live file activity — all stored locally on your
+machine and searchable by meaning.
 
-## Prerequisites
-1. Build the server once (from the repo root):
-   ```bash
-   cd .. && npm install && npm run build
-   ```
-2. Node.js must be reachable. If you installed Node via **nvm / asdf / fnm**, a
-   GUI-launched VS Code won't have it on `PATH` — set `uace.nodePath` to the
-   absolute binary (e.g. `~/.nvm/versions/node/v24.14.0/bin/node`). Find it with
-   `which node`.
+## What you get
 
-## Run it (development)
-```bash
-cd extension
-npm install
-npm run compile        # or: npm run watch
-```
-Then open the `extension/` folder in VS Code and press **F5** ("Run Extension").
-In the new Extension Development Host window:
+- **Shared memory across tools** — a fact saved in one AI tool is available in every other.
+- **Auto-sync** — open a project folder and UACE automatically scans it (languages,
+  frameworks, structure), ingests git history, imports your recent Claude Code sessions,
+  and watches it for changes. No manual setup per project.
+- **Semantic search** — find memories by meaning, not just keywords (local, private,
+  CPU-only embeddings).
+- **Project Brain sidebar** — browse memory, sessions, active files, and commits in the
+  Explorer.
+- **Works with VS Code Copilot out of the box** — the extension registers a local MCP
+  server, so Copilot's agent can read and write your project memory with no config.
 
-1. Open **Settings** → search **UACE** → set **`uace.serverPath`** to the absolute
-   path of the built server, e.g. `/home/shivam/workspace/UACE/dist/server.js`.
-   (Optionally set `uace.dbPath` to override the database location.)
-2. Open the **Explorer** sidebar → **UACE Project Brain** view.
+## Requirements
 
-## Features
-- **Auto-sync (on by default)** — when the editor starts (or you switch folders),
-  the extension automatically scans the **open workspace folder**, imports its
-  Claude Code sessions, and watches it for live file changes. The project id is the
-  folder name, so the same project is shared consistently across every tool. No
-  prompting required. Toggle with `uace.autoSync`; trigger manually with the ⟳
-  **Sync Current Project Now** button.
-- **Tree view** — projects → Working / Long-Term / Session memory, Recent Sessions,
-  Active Files, Recent Commits. Hover any item for full content.
-- **UACE: Refresh** (↻ in the view title) — reload from the database.
-- **UACE: Continue Previous Session** (⟲) — opens the full project context packet as
-  a markdown document (the "open a new session and keep going" flow).
-- **UACE: Save Session** — capture a session summary + next steps into shared memory.
+- **Node.js** on your machine (the local memory engine runs on it). UACE auto-detects
+  Node from your PATH, nvm, fnm, asdf, or system install. If it can't find it, set
+  `uace.nodePath` to your Node binary.
+- VS Code **1.101+** (for the native MCP integration).
+
+On first activation UACE installs its engine locally (one-time, ~1–2 min). After that it
+starts instantly and works offline.
+
+## Use it with Claude Code / Cursor / other tools
+
+Run **“UACE: Copy MCP Config for Claude Code / Cursor”** from the Command Palette. It
+generates a ready-to-paste command/snippet that points those tools at the same local
+memory — so every assistant shares one brain.
+
+## Commands
+
+| Command | What it does |
+|---------|--------------|
+| UACE: Sync Current Project Now | Re-scan + import sessions + watch the open folder |
+| UACE: Continue Previous Session | Open the full project context packet as markdown |
+| UACE: Save Session | Capture a session summary + next steps |
+| UACE: Copy MCP Config… | Snippets to connect Claude Code / Cursor |
+| UACE: Refresh | Reload the sidebar |
 
 ## Settings
+
 | Setting | Description |
 |---------|-------------|
-| `uace.serverPath` | Absolute path to the server entry (`dist/server.js`). Required. |
-| `uace.nodePath` | Absolute path to the Node binary. Required for nvm/asdf/fnm installs. Defaults to `node` on `PATH`. |
-| `uace.dbPath` | Optional `UACE_DB` override. Defaults to `~/.uace/memory.db`. |
-| `uace.autoSync` | Auto scan + import sessions + watch the open folder on startup. Default `true`. |
+| `uace.autoSync` | Auto scan/import/watch the open folder on startup. Default `true`. |
+| `uace.nodePath` | Override: absolute path to Node (only if auto-detect fails). |
+| `uace.serverPath` | Override: path to a local server build (for development). |
+| `uace.dbPath` | Override: memory database path. Default `~/.uace/memory.db`. |
 
-> Packaging to a `.vsix` (via `vsce package`) is possible but not required for local
-> use — F5 runs it directly from source.
+## Privacy
+
+Everything is **local-first**. Your memory lives in a SQLite database at
+`~/.uace/memory.db`. Nothing is sent anywhere; embeddings run on your CPU.
+
+---
+
+*Built on the [Model Context Protocol](https://modelcontextprotocol.io). The engine is
+also available standalone on npm as `uace-mcp`.*

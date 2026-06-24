@@ -5,13 +5,25 @@
   "version": "0.1.0",
   "publisher": "uace",
   "license": "MIT",
-  "engines": {
-    "vscode": "^1.85.0"
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shivamgupta1319/uace.git"
   },
-  "categories": ["Other"],
+  "homepage": "https://github.com/shivamgupta1319/uace#readme",
+  "engines": {
+    "vscode": "^1.101.0"
+  },
+  "categories": ["AI", "Machine Learning", "Other"],
+  "keywords": ["mcp", "ai", "memory", "context", "claude", "cursor", "copilot"],
   "main": "./out/extension.js",
   "activationEvents": ["onStartupFinished"],
   "contributes": {
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "uace",
+        "label": "UACE Memory"
+      }
+    ],
     "views": {
       "explorer": [
         {
@@ -39,6 +51,10 @@
         "command": "uace.syncNow",
         "title": "UACE: Sync Current Project Now",
         "icon": "$(sync)"
+      },
+      {
+        "command": "uace.copyMcpConfig",
+        "title": "UACE: Copy MCP Config for Claude Code / Cursor"
       }
     ],
     "menus": {
@@ -54,12 +70,12 @@
         "uace.serverPath": {
           "type": "string",
           "default": "",
-          "description": "Absolute path to the UACE MCP server entry (dist/server.js). Required."
+          "description": "Optional override: absolute path to a UACE MCP server entry (dist/server.js). Leave empty to auto-install the server from npm on first run. Useful for local development."
         },
         "uace.nodePath": {
           "type": "string",
           "default": "",
-          "description": "Absolute path to the Node.js binary used to run the server. Required if Node is installed via nvm/asdf/fnm (GUI apps don't inherit their PATH). Example: /home/you/.nvm/versions/node/v24.14.0/bin/node. Defaults to 'node' on PATH."
+          "description": "Optional override: absolute path to the Node.js binary. UACE auto-detects Node (PATH, nvm, fnm, asdf, system). Set this only if auto-detection fails. Example: /home/you/.nvm/versions/node/v24.14.0/bin/node."
         },
         "uace.dbPath": {
           "type": "string",
@@ -84,7 +100,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "^1.101.0",
     "typescript": "^5.5.0"
   }
 }

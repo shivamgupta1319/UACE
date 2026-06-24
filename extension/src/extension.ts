@@ -1,6 +1,9 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
 import { UaceClient, DashboardData, ProjectSummary } from "./uaceClient";
+import { resolveRuntime, Runtime } from "./nodeResolver";
+import { ensureServer } from "./serverBootstrap";
+import { UaceMcpProvider } from "./mcpProvider";
 
 /** Discriminated tree nodes. */
 type Node =
@@ -11,24 +14,31 @@ type Node =
 
 type Category = "working" | "long-term" | "session" | "sessions" | "files" | "commits";
 
-function getClient(): UaceClient | null {
-  const cfg = vscode.workspace.getConfiguration("uace");
-  const serverPath = cfg.get<string>("serverPath")?.trim();
-  if (!serverPath) return null;
-  const dbPath = cfg.get<string>("dbPath")?.trim() || undefined;
-  const nodePath = cfg.get<string>("nodePath")?.trim() || undefined;
-  return new UaceClient(serverPath, dbPath, nodePath);
+/** Resolved runtime + server entry, populated by init() once bootstrap finishes. */
+let runtime: Runtime | null = null;
+let serverEntry: string | null = null;
+let startupMessage = "UACE is starting…";
+
+function makeClient(): UaceClient | null {
+  if (!runtime || !serverEntry) return null;
+  const dbPath = vscode.workspace.getConfiguration("uace").get<string>("dbPath")?.trim() || undefined;
+  return new UaceClient(serverEntry, dbPath, runtime.node);
 }
 
 class BrainProvider implements vscode.TreeDataProvider<Node> {
   private _onDidChange = new vscode.EventEmitter<Node | undefined>();
   readonly onDidChangeTreeData = this._onDidChange.event;
 
-  private client: UaceClient | null;
+  private client: UaceClient | null = null;
+  private built = false;
   private cache = new Map<string, DashboardData>();
 
-  constructor() {
-    this.client = getClient();
+  private ensureClient(): UaceClient | null {
+    if (!this.built) {
+      this.client = makeClient();
+      this.built = true;
+    }
+    return this.client;
   }
 
   /** Soft refresh: re-fetch data but keep the server process (and its file
@@ -38,16 +48,17 @@ class BrainProvider implements vscode.TreeDataProvider<Node> {
     this._onDidChange.fire(undefined);
   }
 
-  /** Hard reconnect: tear down the server and re-read settings (on config change). */
+  /** Hard reconnect: tear down the server and rebuild the client (config/runtime change). */
   reconnect(): void {
     this.cache.clear();
     this.client?.dispose();
-    this.client = getClient();
+    this.client = null;
+    this.built = false;
     this._onDidChange.fire(undefined);
   }
 
   getClient(): UaceClient | null {
-    return this.client;
+    return this.ensureClient();
   }
 
   getTreeItem(node: Node): vscode.TreeItem {
@@ -79,11 +90,12 @@ class BrainProvider implements vscode.TreeDataProvider<Node> {
   }
 
   async getChildren(node?: Node): Promise<Node[]> {
-    if (!this.client) {
-      return [{ kind: "message", label: "Set 'uace.serverPath' in Settings to connect." }];
+    const client = this.ensureClient();
+    if (!client) {
+      return [{ kind: "message", label: startupMessage }];
     }
     try {
-      if (!node) return await this.rootProjects();
+      if (!node) return await this.rootProjects(client);
       if (node.kind === "project") return this.categories(node.project);
       if (node.kind === "category") return await this.categoryItems(node.project, node.category);
       return [];
@@ -92,9 +104,9 @@ class BrainProvider implements vscode.TreeDataProvider<Node> {
     }
   }
 
-  private async rootProjects(): Promise<Node[]> {
-    const projects: ProjectSummary[] = await this.client!.listProjects();
-    if (!projects.length) return [{ kind: "message", label: "No projects yet. Use the MCP tools to add memory." }];
+  private async rootProjects(client: UaceClient): Promise<Node[]> {
+    const projects: ProjectSummary[] = await client.listProjects();
+    if (!projects.length) return [{ kind: "message", label: "No projects yet. Open a project folder and it will sync automatically." }];
     return projects.map((p) => ({
       kind: "project" as const,
       project: p.name,
@@ -193,7 +205,7 @@ async function autoSync(provider: BrainProvider, manual = false): Promise<void> 
 
   const client = provider.getClient();
   if (!client) {
-    if (manual) vscode.window.showWarningMessage("UACE: set 'uace.serverPath' (and 'uace.nodePath') first.");
+    if (manual) vscode.window.showWarningMessage(`UACE: not ready — ${startupMessage}`);
     return;
   }
   const folders = localFolders();
@@ -221,27 +233,67 @@ async function autoSync(provider: BrainProvider, manual = false): Promise<void> 
   provider.refresh();
 }
 
+/** Environment passed to the server (only UACE_DB override, if set). */
+function serverEnv(): Record<string, string> {
+  const db = vscode.workspace.getConfiguration("uace").get<string>("dbPath")?.trim();
+  return db ? { UACE_DB: db } : {};
+}
+
+/**
+ * Resolve Node, install/locate the server, register it with VS Code's MCP, then
+ * connect the dashboard. Re-runnable on settings change.
+ */
+async function init(
+  context: vscode.ExtensionContext,
+  provider: BrainProvider,
+  mcp: UaceMcpProvider
+): Promise<void> {
+  runtime = resolveRuntime();
+  if (!runtime) {
+    startupMessage = "Node.js not found. Install Node, or set 'uace.nodePath' in Settings.";
+    serverEntry = null;
+    provider.reconnect();
+    vscode.window.showWarningMessage(
+      "UACE: couldn't find Node.js. Set 'uace.nodePath' to your Node binary in Settings."
+    );
+    return;
+  }
+  try {
+    serverEntry = await ensureServer(context, runtime);
+  } catch (err) {
+    startupMessage = `UACE setup failed: ${(err as Error).message}`;
+    serverEntry = null;
+    provider.reconnect();
+    vscode.window.showErrorMessage(startupMessage);
+    return;
+  }
+
+  // Hand the server to VS Code's Copilot agent (zero-config), then connect the UI.
+  mcp.setServer(runtime.node, serverEntry, serverEnv());
+  provider.reconnect();
+  await autoSync(provider);
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   const provider = new BrainProvider();
+  const mcp = new UaceMcpProvider();
+  mcp.register(context);
+
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider("uaceMemory", provider),
     vscode.commands.registerCommand("uace.refresh", () => provider.refresh()),
     vscode.commands.registerCommand("uace.syncNow", () => autoSync(provider, true)),
+    vscode.commands.registerCommand("uace.copyMcpConfig", () => copyMcpConfig()),
 
-    // Re-onboard when the open folders change.
     vscode.workspace.onDidChangeWorkspaceFolders(() => autoSync(provider)),
-    // Reconnect + re-onboard when UACE settings change.
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("uace")) {
-        provider.reconnect();
-        autoSync(provider);
-      }
+      if (e.affectsConfiguration("uace")) void init(context, provider, mcp);
     }),
 
     vscode.commands.registerCommand("uace.continueSession", async () => {
       const client = provider.getClient();
       if (!client) {
-        vscode.window.showWarningMessage("UACE: set 'uace.serverPath' in Settings first.");
+        vscode.window.showWarningMessage(`UACE: not ready — ${startupMessage}`);
         return;
       }
       const project = await pickProject(client);
@@ -254,7 +306,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("uace.saveSession", async () => {
       const client = provider.getClient();
       if (!client) {
-        vscode.window.showWarningMessage("UACE: set 'uace.serverPath' in Settings first.");
+        vscode.window.showWarningMessage(`UACE: not ready — ${startupMessage}`);
         return;
       }
       const project = await pickProject(client);
@@ -264,21 +316,59 @@ export function activate(context: vscode.ExtensionContext): void {
         placeHolder: "What did you accomplish this session?",
       });
       if (!summary) return;
-      const nextSteps = await vscode.window.showInputBox({
-        prompt: "Next steps (optional)",
-      });
+      const nextSteps = await vscode.window.showInputBox({ prompt: "Next steps (optional)" });
       await client.saveSession({ project, summary, nextSteps: nextSteps || undefined, source: "vscode" });
       vscode.window.showInformationMessage(`UACE: saved session for ${project}.`);
       provider.refresh();
     })
   );
 
-  // Auto-onboard the currently open workspace on startup.
-  void autoSync(provider);
+  // Resolve Node, install/locate the server, register MCP, and sync — in the background.
+  void init(context, provider, mcp);
+}
+
+/** Generate ready-to-paste MCP config for Claude Code and Cursor. */
+async function copyMcpConfig(): Promise<void> {
+  if (!runtime || !serverEntry) {
+    vscode.window.showWarningMessage(`UACE: not ready yet — ${startupMessage}`);
+    return;
+  }
+  const node = runtime.node;
+  const server = serverEntry;
+  const claudeCmd = `claude mcp add uace --scope user -- "${node}" "${server}"`;
+  const cursorJson = JSON.stringify(
+    { mcpServers: { uace: { command: node, args: [server] } } },
+    null,
+    2
+  );
+  const doc = `# Connect UACE to other AI tools
+
+Your local UACE server lets any MCP-capable AI tool share the same project memory.
+
+## Claude Code
+Run this once (available in every project):
+
+\`\`\`bash
+${claudeCmd}
+\`\`\`
+
+## Cursor
+Add to \`~/.cursor/mcp.json\` (merge with any existing servers):
+
+\`\`\`json
+${cursorJson}
+\`\`\`
+
+Then reload the tool. It will read/write the same memory as VS Code.
+`;
+  await vscode.env.clipboard.writeText(claudeCmd);
+  const editor = await vscode.workspace.openTextDocument({ content: doc, language: "markdown" });
+  await vscode.window.showTextDocument(editor, { preview: false });
+  vscode.window.showInformationMessage("UACE: Claude Code command copied to clipboard.");
 }
 
 export function deactivate(): void {
-  /* client is disposed via provider refresh / process exit */
+  /* server processes exit with the extension host */
 }
 
 const CATEGORY_ICON: Record<Category, string> = {
