@@ -1,0 +1,344 @@
+#!/usr/bin/env node
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { openDb, tryEnableVectors } from "./db.js";
+import { MemoryStore } from "./memory.js";
+import { createEmbedder } from "./embedder.js";
+import { scanProject } from "./scanner.js";
+import { readRecentCommits } from "./git.js";
+import { FileWatcher } from "./watcher.js";
+import { importClaudeSessions } from "./transcripts.js";
+import { basename } from "node:path";
+import {
+  saveMemorySchema,
+  searchMemorySchema,
+  getProjectContextSchema,
+  saveSessionSchema,
+  listSessionsSchema,
+  scanProjectSchema,
+  getRecentChangesSchema,
+  reindexMemoriesSchema,
+  watchProjectSchema,
+  unwatchProjectSchema,
+  getActiveFilesSchema,
+  importClaudeSessionsSchema,
+  listProjectsSchema,
+  getDashboardSchema,
+} from "./types.js";
+
+// Guard the MCP stdio channel: any stray library writes to stdout would corrupt
+// the JSON-RPC stream, so route console.log to stderr. (The transport writes to
+// process.stdout directly and is unaffected.)
+console.log = (...args: unknown[]) => console.error(...args);
+
+/**
+ * Universal AI Context Engine — MCP server (stdio).
+ *
+ * The database lives at a SHARED, user-global path by default so that every
+ * MCP client (Claude Code, Cursor, …) reads and writes the same memory. Override
+ * with UACE_DB to point at a per-machine or per-project store.
+ */
+const DB_PATH = process.env.UACE_DB ?? join(homedir(), ".uace", "memory.db");
+
+const db = openDb(DB_PATH);
+const embedder = createEmbedder();
+const vectorsEnabled = embedder ? tryEnableVectors(db, embedder.dim) : false;
+const store = new MemoryStore(db, { embedder, vectorsEnabled });
+const watcher = new FileWatcher();
+
+const server = new McpServer({
+  name: "uace",
+  version: "0.1.0",
+});
+
+const text = (s: string) => ({ content: [{ type: "text" as const, text: s }] });
+
+server.registerTool(
+  "get_project_context",
+  {
+    title: "Get Project Context",
+    description:
+      "Pull the saved context packet for a project (layered memory + recent git changes + last session). Call this at the START of a session so you don't have to re-explain the project. Pass `query` to also get a semantically-ranked 'Most Relevant' section.",
+    inputSchema: getProjectContextSchema,
+  },
+  async ({ project, query, limit }) =>
+    text(await store.buildContextPacket(project, limit, query))
+);
+
+server.registerTool(
+  "save_memory",
+  {
+    title: "Save Memory",
+    description:
+      "Persist a durable fact/decision/standard for a project. Use layer=long-term for architecture/standards, working for current task/TODOs, session for transient notes. Provide a stable `key` to upsert.",
+    inputSchema: saveMemorySchema,
+  },
+  async (args) => {
+    const row = await store.saveMemory(args);
+    return text(`Saved memory #${row.id} (${row.layer}${row.key ? `/${row.key}` : ""}).`);
+  }
+);
+
+server.registerTool(
+  "search_memory",
+  {
+    title: "Search Memory",
+    description:
+      "Search a project's memories by meaning (semantic vector search) when available, falling back to keyword search. Returns the most relevant entries.",
+    inputSchema: searchMemorySchema,
+  },
+  async (args) => {
+    const semantic = await store.semanticSearch(args);
+    const rows = semantic && semantic.length ? semantic : store.searchMemory(args);
+    const mode = semantic && semantic.length ? "semantic" : "keyword";
+    if (!rows.length) return text(`No memories matched "${args.query}".`);
+    const body = rows
+      .map(
+        (r) =>
+          `- [${r.layer}${r.key ? `/${r.key}` : ""}] ${r.content}` +
+          (r.tags ? `  (tags: ${r.tags})` : "")
+      )
+      .join("\n");
+    return text(`(${mode} search)\n${body}`);
+  }
+);
+
+server.registerTool(
+  "save_session",
+  {
+    title: "Save Session",
+    description:
+      "Record a session summary so the next assistant (any tool) can continue. Include what was done, decisions, files touched, and next steps.",
+    inputSchema: saveSessionSchema,
+  },
+  async (args) => {
+    const { row } = store.saveSession(args);
+    return text(`Saved session #${row.id} for ${row.project}.`);
+  }
+);
+
+server.registerTool(
+  "list_sessions",
+  {
+    title: "List Sessions",
+    description: "List recent session summaries for a project (most recent first).",
+    inputSchema: listSessionsSchema,
+  },
+  async ({ project, limit }) => {
+    const rows = store.listSessions(project, limit);
+    if (!rows.length) return text(`No sessions recorded for ${project}.`);
+    const body = rows
+      .map(
+        (r) =>
+          `#${r.id} ${r.created_at}${r.source ? ` [${r.source}]` : ""}` +
+          `\n  ${r.title ? r.title + " — " : ""}${r.summary}` +
+          (r.next_steps ? `\n  next: ${r.next_steps}` : "")
+      )
+      .join("\n");
+    return text(body);
+  }
+);
+
+server.registerTool(
+  "scan_project",
+  {
+    title: "Scan Project",
+    description:
+      "Auto-populate long-term memory from a project directory: detect languages/frameworks, README summary, top-level structure, and ingest recent git commits. Run this once per project (or after big changes) so assistants start with real context.",
+    inputSchema: scanProjectSchema,
+  },
+  async ({ path, project, commitLimit }) => {
+    const scan = await scanProject(path, project);
+    const proj = scan.project;
+
+    if (scan.languages.length)
+      await store.saveMemory({ project: proj, layer: "long-term", key: "languages", content: `Languages/ecosystems: ${scan.languages.join(", ")}.`, tags: ["scan"] });
+    if (scan.frameworks.length)
+      await store.saveMemory({ project: proj, layer: "long-term", key: "frameworks", content: `Frameworks: ${scan.frameworks.join(", ")}.`, tags: ["scan"] });
+    if (scan.structure.length)
+      await store.saveMemory({ project: proj, layer: "long-term", key: "structure", content: `Top-level directories: ${scan.structure.join(", ")}.`, tags: ["scan"] });
+    if (scan.readme)
+      await store.saveMemory({ project: proj, layer: "long-term", key: "readme", content: `README excerpt: ${scan.readme}`, tags: ["scan"] });
+
+    const commits = await readRecentCommits(path, commitLimit);
+    const added = commits.length ? store.saveCommits(proj, commits) : 0;
+
+    const lines = [
+      `Scanned "${proj}" (${path}):`,
+      `- Languages: ${scan.languages.join(", ") || "none detected"}`,
+      `- Frameworks: ${scan.frameworks.join(", ") || "none detected"}`,
+      `- Structure: ${scan.structure.join(", ") || "(flat)"}`,
+      `- README: ${scan.readme ? "captured" : "not found"}`,
+      `- Git: ${commits.length ? `${commits.length} commits read, ${added} new` : "no git repo"}`,
+    ];
+    return text(lines.join("\n"));
+  }
+);
+
+server.registerTool(
+  "get_recent_changes",
+  {
+    title: "Get Recent Changes",
+    description:
+      "List recently ingested git commits for a project (hash, date, message, files). Run scan_project first to populate.",
+    inputSchema: getRecentChangesSchema,
+  },
+  async ({ project, limit }) => {
+    const rows = store.recentCommits(project, limit);
+    if (!rows.length)
+      return text(`No commits stored for ${project}. Run scan_project first.`);
+    const body = rows
+      .map((c) => {
+        const when = c.date ? c.date.slice(0, 10) : "";
+        const files = c.files ? `\n  files: ${c.files}` : "";
+        return `${c.hash.slice(0, 7)} ${when} — ${c.message}${c.author ? ` (${c.author})` : ""}${files}`;
+      })
+      .join("\n");
+    return text(body);
+  }
+);
+
+server.registerTool(
+  "reindex_memories",
+  {
+    title: "Reindex Memories",
+    description:
+      "Backfill semantic embeddings for memories that don't have one yet (e.g. saved before semantic search was enabled). Run once after upgrading.",
+    inputSchema: reindexMemoriesSchema,
+  },
+  async ({ project }) => {
+    if (!store.semanticReady)
+      return text("Semantic search is disabled; nothing to reindex.");
+    const n = await store.reindexMemories(project);
+    return text(`Reindexed ${n} memor${n === 1 ? "y" : "ies"}.`);
+  }
+);
+
+server.registerTool(
+  "watch_project",
+  {
+    title: "Watch Project",
+    description:
+      "Start watching a project directory for live file changes (create/modify/delete). Captures uncommitted work-in-progress, which then appears under 'Recently Active Files' in get_project_context. Watching lasts for this server session.",
+    inputSchema: watchProjectSchema,
+  },
+  async ({ path, project }) => {
+    const proj = project ?? basename(path.replace(/\/+$/, ""));
+    const started = watcher.watch(proj, path, (e) =>
+      store.recordFileEvent(proj, e.path, e.event)
+    );
+    return text(
+      started
+        ? `Watching "${proj}" at ${path}. File activity will be recorded.`
+        : `Already watching "${proj}".`
+    );
+  }
+);
+
+server.registerTool(
+  "unwatch_project",
+  {
+    title: "Unwatch Project",
+    description: "Stop watching a project directory for file changes.",
+    inputSchema: unwatchProjectSchema,
+  },
+  async ({ project }) => {
+    const stopped = await watcher.unwatch(project);
+    return text(stopped ? `Stopped watching "${project}".` : `"${project}" was not being watched.`);
+  }
+);
+
+server.registerTool(
+  "get_active_files",
+  {
+    title: "Get Active Files",
+    description:
+      "List recently changed files for a project (uncommitted activity captured by the watcher), most recent first.",
+    inputSchema: getActiveFilesSchema,
+  },
+  async ({ project, limit }) => {
+    const rows = store.activeFiles(project, limit);
+    if (!rows.length) return text(`No recent file activity for ${project}. (Run watch_project to capture it.)`);
+    const watching = watcher.isWatching(project) ? "" : "\n(note: not currently watching — these are from a previous session)";
+    return text(rows.map((r) => `${r.event.padEnd(7)} ${r.path}`).join("\n") + watching);
+  }
+);
+
+server.registerTool(
+  "import_claude_sessions",
+  {
+    title: "Import Claude Sessions",
+    description:
+      "Auto-capture recent Claude Code sessions for a project by parsing its local transcripts (~/.claude/projects). Extracts the opening prompt, turn counts, and files touched into session memory — no manual save_session needed. Idempotent (dedupes by transcript id).",
+    inputSchema: importClaudeSessionsSchema,
+  },
+  async ({ path, project, maxSessions }) => {
+    const proj = project ?? basename(path.replace(/\/+$/, ""));
+    const parsed = await importClaudeSessions(path, { maxSessions });
+    if (!parsed.length)
+      return text(`No Claude transcripts found for ${path}.`);
+    let created = 0;
+    for (const s of parsed) {
+      const { created: isNew } = store.saveSession({
+        project: proj,
+        title: s.title,
+        summary: s.summary,
+        prompt: s.prompt,
+        files: s.files,
+        source: s.source,
+        externalId: s.externalId,
+      });
+      if (isNew) created++;
+    }
+    return text(
+      `Found ${parsed.length} transcript(s) for "${proj}"; imported ${created} new, ${parsed.length - created} already known.`
+    );
+  }
+);
+
+server.registerTool(
+  "list_projects",
+  {
+    title: "List Projects",
+    description:
+      "List all projects with memory/session counts and last activity, as JSON. Used by the VS Code dashboard.",
+    inputSchema: listProjectsSchema,
+  },
+  async () => text(JSON.stringify(store.listProjects()))
+);
+
+server.registerTool(
+  "get_dashboard",
+  {
+    title: "Get Dashboard",
+    description:
+      "Return a full structured snapshot of one project (memories by layer, recent sessions, active files, recent commits) as JSON. Used by the VS Code dashboard.",
+    inputSchema: getDashboardSchema,
+  },
+  async ({ project }) => text(JSON.stringify(store.dashboard(project)))
+);
+
+async function shutdown(): Promise<void> {
+  await watcher.closeAll();
+  process.exit(0);
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+
+async function main(): Promise<void> {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  // stderr is safe for logs; stdout is the MCP channel.
+  console.error(
+    `[uace] MCP server ready. DB: ${DB_PATH} | semantic search: ${
+      vectorsEnabled ? `on (${embedder?.name})` : "off (keyword fallback)"
+    }`
+  );
+}
+
+main().catch((err) => {
+  console.error("[uace] fatal:", err);
+  process.exit(1);
+});
