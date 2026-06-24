@@ -40,9 +40,8 @@ One-time setup:
    `extension/package.json` → `publisher`).
 2. Create an **Azure DevOps Personal Access Token** with **Marketplace → Manage** scope:
    <https://dev.azure.com> → User settings → Personal access tokens.
-3. (Recommended) Add a 128×128 PNG `extension/media/icon.png` and reference it via
-   `"icon": "media/icon.png"` in `extension/package.json` — Marketplace listings look much
-   better with one.
+
+An icon is already included at `extension/media/icon.png` and referenced in the manifest.
 
 Publish:
 
@@ -74,7 +73,16 @@ build so it skips the npm install:
 2. In the Extension Development Host, set **`uace.serverPath`** to the absolute path of
    `…/UACE/dist/server.js`.
 
-## 5. Optional: automate with CI
+## 5. Automated releases (CI)
 
-A tag-triggered GitHub Actions workflow can run `npm publish` and `vsce publish` together.
-Store `NPM_TOKEN` and `VSCE_PAT` as repository secrets.
+A workflow is included at `.github/workflows/release.yml`. Once your code is on GitHub:
+
+1. Add repository secrets **`NPM_TOKEN`** (npm automation token) and **`VSCE_PAT`** (the
+   Azure DevOps PAT).
+2. Bump the version in both `package.json` files and `SERVER_VERSION` in
+   `extension/src/serverBootstrap.ts`.
+3. Tag and push:
+   ```bash
+   git tag v0.1.0 && git push origin v0.1.0
+   ```
+   The workflow publishes the npm package first, then the extension.
