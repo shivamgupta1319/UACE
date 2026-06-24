@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import * as path from "node:path";
 import { UaceClient, DashboardData, ProjectSummary } from "./uaceClient";
 
 /** Discriminated tree nodes. */
@@ -30,7 +31,15 @@ class BrainProvider implements vscode.TreeDataProvider<Node> {
     this.client = getClient();
   }
 
+  /** Soft refresh: re-fetch data but keep the server process (and its file
+   *  watcher) alive. */
   refresh(): void {
+    this.cache.clear();
+    this._onDidChange.fire(undefined);
+  }
+
+  /** Hard reconnect: tear down the server and re-read settings (on config change). */
+  reconnect(): void {
     this.cache.clear();
     this.client?.dispose();
     this.client = getClient();
@@ -167,11 +176,67 @@ async function pickProject(client: UaceClient): Promise<string | undefined> {
   );
 }
 
+/** Local filesystem workspace folders only. */
+function localFolders(): vscode.WorkspaceFolder[] {
+  return (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === "file");
+}
+
+/**
+ * Auto-onboard each open workspace folder: scan it, import its Claude Code
+ * sessions, and start watching it for live file changes. Idempotent — safe to
+ * re-run on every activation / workspace change. The project id is the folder
+ * name, so naming stays consistent across tools.
+ */
+async function autoSync(provider: BrainProvider, manual = false): Promise<void> {
+  const cfg = vscode.workspace.getConfiguration("uace");
+  if (!manual && !cfg.get<boolean>("autoSync", true)) return;
+
+  const client = provider.getClient();
+  if (!client) {
+    if (manual) vscode.window.showWarningMessage("UACE: set 'uace.serverPath' (and 'uace.nodePath') first.");
+    return;
+  }
+  const folders = localFolders();
+  if (!folders.length) {
+    if (manual) vscode.window.showInformationMessage("UACE: no workspace folder open to sync.");
+    return;
+  }
+
+  await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Window, title: "UACE: syncing project…" },
+    async () => {
+      for (const folder of folders) {
+        const fsPath = folder.uri.fsPath;
+        const project = path.basename(fsPath);
+        try {
+          await client.scanProject(fsPath, project);
+          await client.importSessions(fsPath, project);
+          await client.watchProject(fsPath, project);
+        } catch (err) {
+          vscode.window.showErrorMessage(`UACE: sync failed for ${project}: ${(err as Error).message}`);
+        }
+      }
+    }
+  );
+  provider.refresh();
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   const provider = new BrainProvider();
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider("uaceMemory", provider),
     vscode.commands.registerCommand("uace.refresh", () => provider.refresh()),
+    vscode.commands.registerCommand("uace.syncNow", () => autoSync(provider, true)),
+
+    // Re-onboard when the open folders change.
+    vscode.workspace.onDidChangeWorkspaceFolders(() => autoSync(provider)),
+    // Reconnect + re-onboard when UACE settings change.
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("uace")) {
+        provider.reconnect();
+        autoSync(provider);
+      }
+    }),
 
     vscode.commands.registerCommand("uace.continueSession", async () => {
       const client = provider.getClient();
@@ -207,6 +272,9 @@ export function activate(context: vscode.ExtensionContext): void {
       provider.refresh();
     })
   );
+
+  // Auto-onboard the currently open workspace on startup.
+  void autoSync(provider);
 }
 
 export function deactivate(): void {

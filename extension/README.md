@@ -33,6 +33,12 @@ In the new Extension Development Host window:
 2. Open the **Explorer** sidebar → **UACE Project Brain** view.
 
 ## Features
+- **Auto-sync (on by default)** — when the editor starts (or you switch folders),
+  the extension automatically scans the **open workspace folder**, imports its
+  Claude Code sessions, and watches it for live file changes. The project id is the
+  folder name, so the same project is shared consistently across every tool. No
+  prompting required. Toggle with `uace.autoSync`; trigger manually with the ⟳
+  **Sync Current Project Now** button.
 - **Tree view** — projects → Working / Long-Term / Session memory, Recent Sessions,
   Active Files, Recent Commits. Hover any item for full content.
 - **UACE: Refresh** (↻ in the view title) — reload from the database.
@@ -46,6 +52,7 @@ In the new Extension Development Host window:
 | `uace.serverPath` | Absolute path to the server entry (`dist/server.js`). Required. |
 | `uace.nodePath` | Absolute path to the Node binary. Required for nvm/asdf/fnm installs. Defaults to `node` on `PATH`. |
 | `uace.dbPath` | Optional `UACE_DB` override. Defaults to `~/.uace/memory.db`. |
+| `uace.autoSync` | Auto scan + import sessions + watch the open folder on startup. Default `true`. |
 
 > Packaging to a `.vsix` (via `vsce package`) is possible but not required for local
 > use — F5 runs it directly from source.

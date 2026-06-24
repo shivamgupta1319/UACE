@@ -128,6 +128,17 @@ export class UaceClient {
     return this.call("save_session", args);
   }
 
+  // --- auto-onboard the open workspace ---
+  async scanProject(path: string, project: string): Promise<string> {
+    return this.call("scan_project", { path, project });
+  }
+  async importSessions(path: string, project: string): Promise<string> {
+    return this.call("import_claude_sessions", { path, project });
+  }
+  async watchProject(path: string, project: string): Promise<string> {
+    return this.call("watch_project", { path, project });
+  }
+
   async dispose(): Promise<void> {
     try {
       await this.client?.close();

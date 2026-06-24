@@ -10,7 +10,7 @@
   },
   "categories": ["Other"],
   "main": "./out/extension.js",
-  "activationEvents": [],
+  "activationEvents": ["onStartupFinished"],
   "contributes": {
     "views": {
       "explorer": [
@@ -34,10 +34,16 @@
         "command": "uace.continueSession",
         "title": "UACE: Continue Previous Session",
         "icon": "$(history)"
+      },
+      {
+        "command": "uace.syncNow",
+        "title": "UACE: Sync Current Project Now",
+        "icon": "$(sync)"
       }
     ],
     "menus": {
       "view/title": [
+        { "command": "uace.syncNow", "when": "view == uaceMemory", "group": "navigation" },
         { "command": "uace.refresh", "when": "view == uaceMemory", "group": "navigation" },
         { "command": "uace.continueSession", "when": "view == uaceMemory", "group": "navigation" }
       ]
@@ -59,6 +65,11 @@
           "type": "string",
           "default": "",
           "description": "Optional override for the memory database path (UACE_DB). Defaults to ~/.uace/memory.db."
+        },
+        "uace.autoSync": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically scan the open workspace folder, import its Claude Code sessions, and watch it for file changes when the editor starts."
         }
       }
     }
