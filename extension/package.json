@@ -1,0 +1,79 @@
+{
+  "name": "uace-dashboard",
+  "displayName": "UACE — AI Memory",
+  "description": "Sidebar dashboard for the Universal AI Context Engine: see your project's shared AI memory, sessions, active files and commits.",
+  "version": "0.1.0",
+  "publisher": "uace",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "main": "./out/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "views": {
+      "explorer": [
+        {
+          "id": "uaceMemory",
+          "name": "UACE Project Brain"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "uace.refresh",
+        "title": "UACE: Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "uace.saveSession",
+        "title": "UACE: Save Session"
+      },
+      {
+        "command": "uace.continueSession",
+        "title": "UACE: Continue Previous Session",
+        "icon": "$(history)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "uace.refresh", "when": "view == uaceMemory", "group": "navigation" },
+        { "command": "uace.continueSession", "when": "view == uaceMemory", "group": "navigation" }
+      ]
+    },
+    "configuration": {
+      "title": "UACE",
+      "properties": {
+        "uace.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the UACE MCP server entry (dist/server.js). Required."
+        },
+        "uace.nodePath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the Node.js binary used to run the server. Required if Node is installed via nvm/asdf/fnm (GUI apps don't inherit their PATH). Example: /home/you/.nvm/versions/node/v24.14.0/bin/node. Defaults to 'node' on PATH."
+        },
+        "uace.dbPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional override for the memory database path (UACE_DB). Defaults to ~/.uace/memory.db."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.5.0"
+  }
+}
