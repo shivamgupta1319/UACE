@@ -65,7 +65,7 @@ const watcher = new FileWatcher();
 
 const server = new McpServer({
   name: "uace",
-  version: "0.2.2",
+  version: "0.2.3",
 });
 
 const text = (s: string) => ({ content: [{ type: "text" as const, text: s }] });

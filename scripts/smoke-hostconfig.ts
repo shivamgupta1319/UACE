@@ -11,6 +11,7 @@ import {
   upsertMcpServer,
   removeMcpServer,
   npxServer,
+  localServer,
   upsertBlock,
   stripBlock,
   writeRulesMarkdown,
@@ -40,6 +41,13 @@ try {
   assert.equal(parsed.mcpServers.uace.command, "npx", "uace command updated");
   assert.deepEqual(parsed.mcpServers.uace.args, ["-y", "uace-mcp"], "uace args updated");
   assert.equal(parsed.mcpServers.uace.$typeName, "x.Server", "Antigravity $typeName on uace preserved");
+
+  // localServer writes absolute node+serverEntry (GUI hosts without npx on PATH).
+  const guiCfg = join(dir, "mcp_config_gui.json");
+  upsertMcpServer(guiCfg, localServer("/abs/bin/node", "/abs/dist/server.js"));
+  const gui = JSON.parse(readFileSync(guiCfg, "utf8"));
+  assert.equal(gui.mcpServers.uace.command, "/abs/bin/node", "GUI config uses absolute node");
+  assert.deepEqual(gui.mcpServers.uace.args, ["/abs/dist/server.js"], "GUI config points at server entry, not npx");
 
   // removeMcpServer removes ONLY uace.
   assert.equal(removeMcpServer(cfg), true, "removeMcpServer reports removal");
