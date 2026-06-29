@@ -19,7 +19,7 @@ import { importClaudeSessions, parseTranscript } from "./transcripts.js";
  * injects stdout into the model's context, so any stray noise would corrupt it).
  * All logs/diagnostics go to stderr.
  */
-export const CLI_SUBCOMMANDS = new Set(["context", "save-session", "sync"]);
+export const CLI_SUBCOMMANDS = new Set(["context", "save-session", "sync", "prune"]);
 
 type Flags = { _: string[] } & Record<string, string | boolean | string[]>;
 
@@ -79,6 +79,8 @@ export async function runCli(argv: string[]): Promise<number> {
       return cmdSaveSession(flags);
     case "sync":
       return cmdSync(flags);
+    case "prune":
+      return cmdPrune(flags);
     default:
       log(`Unknown command: ${sub ?? "(none)"}. Expected: context | save-session | sync.`);
       return 2;
@@ -139,6 +141,20 @@ async function cmdSaveSession(flags: Flags): Promise<number> {
   }
   const { row } = store.saveSession({ project, summary, nextSteps: str(flags, "next") });
   log(`Saved session #${row.id} for "${project}".`);
+  return 0;
+}
+
+async function cmdPrune(flags: Flags): Promise<number> {
+  const project = str(flags, "project") ?? flags._[0];
+  const days = Number(str(flags, "days") ?? 30) || 30;
+  const apply = flags.apply === true;
+  const store = makeStore(false);
+  const r = store.pruneStale({ project, days, apply });
+  const scope = project ? `"${project}"` : "all projects";
+  log(
+    `${apply ? "Pruned" : "Would prune (dry-run)"} ${r.memories.length} memories and ` +
+      `${r.fileEvents} file events older than ${days} days in ${scope}.`
+  );
   return 0;
 }
 

@@ -153,6 +153,53 @@ export class MemoryStore {
     return purge(project);
   }
 
+  /**
+   * Find (and optionally delete) stale working/session memories and old file
+   * events. Dry-run by default: returns the candidates without changing anything.
+   * Long-term memory is never pruned (it's the durable architecture/standards).
+   */
+  pruneStale(opts: { project?: string; days?: number; apply?: boolean } = {}): {
+    applied: boolean;
+    days: number;
+    memories: { id: number; project: string; layer: string; key: string | null; content: string }[];
+    fileEvents: number;
+  } {
+    const days = opts.days && opts.days > 0 ? Math.floor(opts.days) : 30;
+    const modifier = `-${days} days`;
+    const apply = opts.apply ?? false;
+
+    const memSql =
+      `SELECT id, project, layer, key, content FROM memories
+        WHERE layer IN ('working','session') AND updated_at < datetime('now', ?)` +
+      (opts.project ? ` AND project = ?` : ``);
+    const memArgs = opts.project ? [modifier, opts.project] : [modifier];
+    const memories = this.db.prepare(memSql).all(...memArgs) as {
+      id: number;
+      project: string;
+      layer: string;
+      key: string | null;
+      content: string;
+    }[];
+
+    const feSql =
+      `SELECT count(*) AS c FROM file_events WHERE ts < datetime('now', ?)` +
+      (opts.project ? ` AND project = ?` : ``);
+    const fileEvents = (this.db.prepare(feSql).get(...memArgs) as { c: number }).c;
+
+    if (apply) {
+      const run = this.db.transaction(() => {
+        for (const m of memories) this.deleteMemory(m.id); // clears embeddings + FTS too
+        const feDelSql =
+          `DELETE FROM file_events WHERE ts < datetime('now', ?)` +
+          (opts.project ? ` AND project = ?` : ``);
+        this.db.prepare(feDelSql).run(...memArgs);
+      });
+      run();
+    }
+
+    return { applied: apply, days, memories, fileEvents };
+  }
+
   /** Full-text search within a project, optionally scoped to one layer. */
   searchMemory(input: {
     project: string;

@@ -31,6 +31,7 @@ import {
   deleteMemorySchema,
   deleteSessionSchema,
   deleteProjectSchema,
+  pruneStaleSchema,
 } from "./types.js";
 
 // Guard the MCP stdio channel: any stray library writes to stdout would corrupt
@@ -421,6 +422,31 @@ server.registerPrompt(
       },
     ],
   })
+);
+
+server.registerTool(
+  "prune_stale",
+  {
+    title: "Prune Stale Memory",
+    description:
+      "Find (and optionally delete) stale working/session memories and old file-activity events older than N days, so the brain self-cleans. Long-term memory is never touched. Dry-run by default — pass apply=true to actually delete.",
+    inputSchema: pruneStaleSchema,
+  },
+  async ({ project, days, apply }) => {
+    const r = store.pruneStale({ project, days, apply });
+    const scope = project ? `"${project}"` : "all projects";
+    if (!r.memories.length && !r.fileEvents) {
+      return text(`Nothing older than ${r.days} days in ${scope}.`);
+    }
+    const head = r.applied
+      ? `Pruned ${r.memories.length} memor${r.memories.length === 1 ? "y" : "ies"} and ${r.fileEvents} file event(s) older than ${r.days} days in ${scope}.`
+      : `Would prune ${r.memories.length} memor${r.memories.length === 1 ? "y" : "ies"} and ${r.fileEvents} file event(s) older than ${r.days} days in ${scope} (dry-run; pass apply=true).`;
+    const list = r.memories
+      .slice(0, 20)
+      .map((m) => `- #${m.id} [${m.layer}${m.key ? `/${m.key}` : ""}] ${m.content.slice(0, 80)}`)
+      .join("\n");
+    return text(list ? `${head}\n${list}` : head);
+  }
 );
 
 async function shutdown(): Promise<void> {

@@ -141,6 +141,22 @@ assert.match(capped, /trimmed to ~200 chars/, "truncation is disclosed");
 const empty = await store.buildContextPacket("other-project", 20);
 assert.match(empty, /No memories stored yet/);
 
+// 8b. Phase 6 — prune_stale: dry-run finds candidates without deleting; apply removes them.
+const pp = "prune-proj";
+const keep = await store.saveMemory({ project: pp, layer: "long-term", key: "arch", content: "keep me forever" });
+const old = await store.saveMemory({ project: pp, layer: "session", key: "tmp", content: "stale note" });
+db.prepare(`UPDATE memories SET updated_at = datetime('now','-60 days') WHERE id = ?`).run(old.id);
+store.recordFileEvent(pp, "/x/a.ts", "change");
+db.prepare(`UPDATE file_events SET ts = datetime('now','-60 days') WHERE project = ?`).run(pp);
+const dry = store.pruneStale({ project: pp, days: 30, apply: false });
+assert.equal(dry.memories.length, 1, "dry-run finds the stale session memory");
+assert.equal(dry.fileEvents, 1, "dry-run finds the old file event");
+assert.ok(store.getMemory(old.id), "dry-run must NOT delete");
+const applied = store.pruneStale({ project: pp, days: 30, apply: true });
+assert.equal(applied.applied, true, "apply reports applied");
+assert.ok(!store.getMemory(old.id), "apply deletes the stale memory");
+assert.ok(store.getMemory(keep.id), "long-term memory is never pruned");
+
 // 9. scanner + git on this repo
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const scan = await scanProject(repoRoot, "uace-self");
