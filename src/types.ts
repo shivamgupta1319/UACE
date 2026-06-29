@@ -200,3 +200,17 @@ export const deleteSessionSchema = {
 export const deleteProjectSchema = {
   project: projectField,
 };
+
+export const pruneStaleSchema = {
+  project: z.string().optional().describe("Limit to one project (default: all projects)."),
+  days: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Age threshold in days; working/session memories and file events older than this are candidates (default 30)."),
+  apply: z
+    .boolean()
+    .optional()
+    .describe("Actually delete the candidates. Default false = dry-run (returns what WOULD be pruned)."),
+};

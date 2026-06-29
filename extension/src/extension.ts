@@ -4,6 +4,8 @@ import { UaceClient, DashboardData, ProjectSummary } from "./uaceClient";
 import { resolveRuntime, Runtime } from "./nodeResolver";
 import { ensureServer } from "./serverBootstrap";
 import { UaceMcpProvider } from "./mcpProvider";
+import { detectHost, hostLabel, removeAutonomy, setupAutonomy } from "./hostIntegration";
+import { execFile } from "node:child_process";
 
 /** Discriminated tree nodes. */
 type Node =
@@ -27,6 +29,11 @@ type Category = "working" | "long-term" | "session" | "sessions" | "files" | "co
 let runtime: Runtime | null = null;
 let serverEntry: string | null = null;
 let startupMessage = "UACE is starting…";
+/** Short autonomy status shown at the top of the tree (set after setup runs). */
+let autonomyStatus: string | null = null;
+
+const CONSENT_KEY = "uace.autonomy.consent";
+type Consent = "granted" | "declined-forever" | undefined;
 
 function makeClient(): UaceClient | null {
   if (!runtime || !serverEntry) return null;
@@ -117,12 +124,17 @@ class BrainProvider implements vscode.TreeDataProvider<Node> {
 
   private async rootProjects(client: UaceClient): Promise<Node[]> {
     const projects: ProjectSummary[] = await client.listProjects();
-    if (!projects.length) return [{ kind: "message", label: "No projects yet. Open a project folder and it will sync automatically." }];
-    return projects.map((p) => ({
-      kind: "project" as const,
-      project: p.name,
-      description: `${p.memories} memories · ${p.sessions} sessions`,
-    }));
+    const status: Node[] = autonomyStatus ? [{ kind: "message", label: autonomyStatus }] : [];
+    if (!projects.length)
+      return [...status, { kind: "message", label: "No projects yet. Open a project folder and it will sync automatically." }];
+    return [
+      ...status,
+      ...projects.map((p) => ({
+        kind: "project" as const,
+        project: p.name,
+        description: `${p.memories} memories · ${p.sessions} sessions`,
+      })),
+    ];
   }
 
   private async load(project: string): Promise<DashboardData> {
@@ -289,6 +301,105 @@ async function autoSync(provider: BrainProvider, manual = false): Promise<void> 
   provider.refresh();
 }
 
+/** Build the context setupAutonomy needs from the resolved runtime + workspace. */
+function autonomyContext() {
+  if (!runtime || !serverEntry) return null;
+  return {
+    host: detectHost(),
+    node: runtime.node,
+    serverEntry,
+    env: serverEnv(),
+    workspaceRoots: localFolders().map((f) => f.uri.fsPath),
+  };
+}
+
+/**
+ * Wire the project for autonomous context: register the MCP server in this host
+ * and write rules/hooks so any AI tool recalls at session start and saves at the
+ * end. Gated by a one-time per-workspace consent (we write into the repo + host
+ * config). `manual` (the command) bypasses the prompt.
+ */
+async function maybeSetupAutonomy(
+  context: vscode.ExtensionContext,
+  provider: BrainProvider,
+  manual = false
+): Promise<void> {
+  const ctx = autonomyContext();
+  if (!ctx) {
+    if (manual) vscode.window.showWarningMessage(`UACE: not ready — ${startupMessage}`);
+    return;
+  }
+  if (!ctx.workspaceRoots.length) {
+    if (manual) vscode.window.showInformationMessage("UACE: open a workspace folder first.");
+    return;
+  }
+
+  const consent = context.workspaceState.get<Consent>(CONSENT_KEY);
+  if (!manual) {
+    if (consent === "declined-forever") return;
+    if (consent !== "granted") {
+      const pick = await vscode.window.showInformationMessage(
+        `UACE: set up autonomous context for this project? Registers the MCP server in ${hostLabel(ctx.host)} and writes AGENTS.md + rules (and Claude Code hooks) so any AI tool can continue without re-explaining.`,
+        "Set up",
+        "Not now",
+        "Never for this project"
+      );
+      if (pick === "Never for this project") {
+        await context.workspaceState.update(CONSENT_KEY, "declined-forever");
+        return;
+      }
+      if (pick !== "Set up") return; // "Not now" / dismissed → ask again next time
+    }
+  }
+  await context.workspaceState.update(CONSENT_KEY, "granted");
+
+  try {
+    const report = setupAutonomy(ctx);
+    autonomyStatus = `✓ Autonomous context (${hostLabel(ctx.host)})`;
+    provider.refresh();
+    prewarm(ctx.workspaceRoots[0]);
+    const msg = `UACE: autonomy set up.\n${report.lines.join("\n")}`;
+    if (report.needsReload) {
+      const r = await vscode.window.showInformationMessage(msg, "Reload Window");
+      if (r === "Reload Window") void vscode.commands.executeCommand("workbench.action.reloadWindow");
+    } else {
+      vscode.window.showInformationMessage(msg);
+    }
+  } catch (err) {
+    vscode.window.showErrorMessage(`UACE: autonomy setup failed — ${(err as Error).message}`);
+  }
+}
+
+/** Warm the `npx uace-mcp` cache in the background so the first real session in
+ *  Cursor/Claude Code doesn't hit the one-time download inside the host's MCP timeout. */
+function prewarm(project: string): void {
+  if (!runtime?.npmCli) return;
+  const env: NodeJS.ProcessEnv = { ...process.env, UACE_NO_EMBED: "1" };
+  execFile(
+    runtime.node,
+    [runtime.npmCli, "exec", "-y", "uace-mcp", "--", "context", project],
+    { env, timeout: 5 * 60 * 1000, maxBuffer: 1024 * 1024 * 16 },
+    () => {
+      /* fire-and-forget: warms the npx cache; errors are non-fatal */
+    }
+  );
+}
+
+/** Remove all UACE-written config/rules/hooks for this workspace. */
+async function teardownAutonomy(context: vscode.ExtensionContext, provider: BrainProvider): Promise<void> {
+  const ctx = autonomyContext();
+  if (!ctx) return;
+  try {
+    const lines = removeAutonomy({ host: ctx.host, workspaceRoots: ctx.workspaceRoots });
+    await context.workspaceState.update(CONSENT_KEY, "declined-forever");
+    autonomyStatus = null;
+    provider.refresh();
+    vscode.window.showInformationMessage(`UACE: ${lines.join(" ")}`);
+  } catch (err) {
+    vscode.window.showErrorMessage(`UACE: removing autonomy failed — ${(err as Error).message}`);
+  }
+}
+
 /** Environment passed to the server (only UACE_DB override, if set). */
 function serverEnv(): Record<string, string> {
   const db = vscode.workspace.getConfiguration("uace").get<string>("dbPath")?.trim();
@@ -328,6 +439,7 @@ async function init(
   mcp.setServer(runtime.node, serverEntry, serverEnv());
   provider.reconnect();
   await autoSync(provider);
+  await maybeSetupAutonomy(context, provider);
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -340,6 +452,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("uace.refresh", () => provider.refresh()),
     vscode.commands.registerCommand("uace.syncNow", () => autoSync(provider, true)),
     vscode.commands.registerCommand("uace.copyMcpConfig", () => copyMcpConfig()),
+    vscode.commands.registerCommand("uace.setupAutonomy", () => maybeSetupAutonomy(context, provider, true)),
+    vscode.commands.registerCommand("uace.removeAutonomy", () => teardownAutonomy(context, provider)),
     vscode.commands.registerCommand("uace.delete", (node?: Node) => deleteNode(provider, node)),
 
     vscode.workspace.onDidChangeWorkspaceFolders(() => autoSync(provider)),

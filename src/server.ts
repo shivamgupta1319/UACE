@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { openDb, tryEnableVectors } from "./db.js";
 import { MemoryStore } from "./memory.js";
 import { createEmbedder } from "./embedder.js";
-import { scanProject } from "./scanner.js";
+import { scanProject, scanToMemories } from "./scanner.js";
 import { readRecentCommits } from "./git.js";
+import { runCli, CLI_SUBCOMMANDS } from "./cli.js";
 import { FileWatcher } from "./watcher.js";
 import { importClaudeSessions } from "./transcripts.js";
 import { basename } from "node:path";
@@ -29,6 +31,7 @@ import {
   deleteMemorySchema,
   deleteSessionSchema,
   deleteProjectSchema,
+  pruneStaleSchema,
 } from "./types.js";
 
 // Guard the MCP stdio channel: any stray library writes to stdout would corrupt
@@ -45,6 +48,15 @@ console.log = (...args: unknown[]) => console.error(...args);
  */
 const DB_PATH = process.env.UACE_DB ?? join(homedir(), ".uace", "memory.db");
 
+// CLI mode: `uace-mcp <context|save-session|sync> …` runs a one-shot command and
+// exits, reusing the same shared DB. Anything else (incl. no args) starts the MCP
+// stdio server below. Top-level await guarantees the server bootstrap never runs
+// in CLI mode. (Embeddings stay lazy, so the server consts cost nothing here.)
+const cliSub = process.argv[2];
+if (cliSub && CLI_SUBCOMMANDS.has(cliSub)) {
+  process.exit(await runCli(process.argv.slice(2)));
+}
+
 const db = openDb(DB_PATH);
 const embedder = createEmbedder();
 const vectorsEnabled = embedder ? tryEnableVectors(db, embedder.dim) : false;
@@ -53,7 +65,7 @@ const watcher = new FileWatcher();
 
 const server = new McpServer({
   name: "uace",
-  version: "0.1.4",
+  version: "0.2.0",
 });
 
 const text = (s: string) => ({ content: [{ type: "text" as const, text: s }] });
@@ -156,14 +168,9 @@ server.registerTool(
     const scan = await scanProject(path, project);
     const proj = scan.project;
 
-    if (scan.languages.length)
-      await store.saveMemory({ project: proj, layer: "long-term", key: "languages", content: `Languages/ecosystems: ${scan.languages.join(", ")}.`, tags: ["scan"] });
-    if (scan.frameworks.length)
-      await store.saveMemory({ project: proj, layer: "long-term", key: "frameworks", content: `Frameworks: ${scan.frameworks.join(", ")}.`, tags: ["scan"] });
-    if (scan.structure.length)
-      await store.saveMemory({ project: proj, layer: "long-term", key: "structure", content: `Top-level directories: ${scan.structure.join(", ")}.`, tags: ["scan"] });
-    if (scan.readme)
-      await store.saveMemory({ project: proj, layer: "long-term", key: "readme", content: `README excerpt: ${scan.readme}`, tags: ["scan"] });
+    for (const mem of scanToMemories(scan)) {
+      await store.saveMemory({ project: proj, ...mem });
+    }
 
     const commits = await readRecentCommits(path, commitLimit);
     const added = commits.length ? store.saveCommits(proj, commits) : 0;
@@ -292,6 +299,8 @@ server.registerTool(
         files: s.files,
         source: s.source,
         externalId: s.externalId,
+        decisions: s.decisions,
+        nextSteps: s.nextSteps,
       });
       if (isNew) created++;
     }
@@ -362,6 +371,81 @@ server.registerTool(
     return text(
       `Deleted project "${project}" (${n.memories} memories, ${n.sessions} sessions, ${n.files} files, ${n.commits} commits).`
     );
+  }
+);
+
+// --- MCP prompts: one-click flows for any MCP client (complements hooks/rules) ---
+
+server.registerPrompt(
+  "continue-project",
+  {
+    title: "Continue Project",
+    description: "Load this project's UACE memory and continue where the last session left off.",
+    argsSchema: { project: z.string().describe("Project name (usually the workspace folder name).") },
+  },
+  ({ project }) => ({
+    messages: [
+      {
+        role: "user",
+        content: {
+          type: "text",
+          text:
+            `Continue project "${project}" using the uace MCP server. First call get_project_context for ` +
+            `"${project}" to load prior decisions, the current task, recent changes, and where the last ` +
+            `session left off. Then summarize the state and ask what to work on next — without making me ` +
+            `re-explain the project.`,
+        },
+      },
+    ],
+  })
+);
+
+server.registerPrompt(
+  "save-checkpoint",
+  {
+    title: "Save Checkpoint",
+    description: "Persist a session checkpoint to UACE so any tool can continue later.",
+    argsSchema: { project: z.string().describe("Project name (usually the workspace folder name).") },
+  },
+  ({ project }) => ({
+    messages: [
+      {
+        role: "user",
+        content: {
+          type: "text",
+          text:
+            `Save a UACE checkpoint for project "${project}". Call save_session with a concise summary of ` +
+            `what we did, the key decisions, the files touched, and concrete next steps. Also call ` +
+            `save_memory for any durable architecture/standards (layer long-term) or current-task notes ` +
+            `(layer working) worth keeping.`,
+        },
+      },
+    ],
+  })
+);
+
+server.registerTool(
+  "prune_stale",
+  {
+    title: "Prune Stale Memory",
+    description:
+      "Find (and optionally delete) stale working/session memories and old file-activity events older than N days, so the brain self-cleans. Long-term memory is never touched. Dry-run by default — pass apply=true to actually delete.",
+    inputSchema: pruneStaleSchema,
+  },
+  async ({ project, days, apply }) => {
+    const r = store.pruneStale({ project, days, apply });
+    const scope = project ? `"${project}"` : "all projects";
+    if (!r.memories.length && !r.fileEvents) {
+      return text(`Nothing older than ${r.days} days in ${scope}.`);
+    }
+    const head = r.applied
+      ? `Pruned ${r.memories.length} memor${r.memories.length === 1 ? "y" : "ies"} and ${r.fileEvents} file event(s) older than ${r.days} days in ${scope}.`
+      : `Would prune ${r.memories.length} memor${r.memories.length === 1 ? "y" : "ies"} and ${r.fileEvents} file event(s) older than ${r.days} days in ${scope} (dry-run; pass apply=true).`;
+    const list = r.memories
+      .slice(0, 20)
+      .map((m) => `- #${m.id} [${m.layer}${m.key ? `/${m.key}` : ""}] ${m.content.slice(0, 80)}`)
+      .join("\n");
+    return text(list ? `${head}\n${list}` : head);
   }
 );
 

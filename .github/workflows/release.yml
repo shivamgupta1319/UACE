@@ -47,11 +47,14 @@ jobs:
       - name: Package extension
         working-directory: extension
         run: npx --yes @vscode/vsce package -o uace-dashboard.vsix
+      # Skipped cleanly when VSCE_PAT isn't set (MS Marketplace updated manually),
+      # so it never blocks the Open VSX publish below.
       - name: Publish to VS Code Marketplace
         working-directory: extension
-        run: npx --yes @vscode/vsce publish --packagePath uace-dashboard.vsix -p "$VSCE_PAT"
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        if: ${{ env.VSCE_PAT != '' }}
+        run: npx --yes @vscode/vsce publish --packagePath uace-dashboard.vsix -p "$VSCE_PAT"
       - name: Publish to Open VSX (Cursor / Antigravity / VSCodium)
         working-directory: extension
         run: npx --yes ovsx publish uace-dashboard.vsix -p "$OVSX_PAT"

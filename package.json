@@ -1,6 +1,6 @@
 {
   "name": "uace-mcp",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "Universal AI Context Engine — local-first shared project memory served to any MCP-capable AI assistant.",
   "type": "module",
   "license": "MIT",
@@ -38,7 +38,7 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/server.ts",
     "start": "node dist/server.js",
-    "smoke": "tsx scripts/smoke.ts",
+    "smoke": "tsx scripts/smoke.ts && tsx scripts/smoke-cli.ts && tsx scripts/smoke-hostconfig.ts",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

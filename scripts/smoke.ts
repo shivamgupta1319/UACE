@@ -126,9 +126,36 @@ assert.match(packet, /Long-Term Memory/);
 assert.match(packet, /Most Relevant to: "login authentication"/);
 assert.match(packet, /JWT token auth/, "relevant section should surface the auth memory");
 
+// 7b. Phase 5 — freshness/stale flag, dedupe, and size cap.
+await store.saveMemory({ project, layer: "working", key: "current-task", content: "wiring oauth refresh" });
+// Backdate it 30 days to trigger the stale flag.
+db.prepare(`UPDATE memories SET updated_at = datetime('now','-30 days') WHERE project=? AND layer='working' AND key='current-task'`).run(project);
+const stalePacket = await store.buildContextPacket(project, 20);
+assert.match(stalePacket, /Working Memory/, "working memory section present");
+assert.match(stalePacket, /may be stale/, "30-day-old working memory is flagged stale");
+const capped = await store.buildContextPacket(project, 20, undefined, 200);
+assert.ok(capped.length < 600, "size cap keeps the packet small");
+assert.match(capped, /trimmed to ~200 chars/, "truncation is disclosed");
+
 // 8. cross-project isolation
 const empty = await store.buildContextPacket("other-project", 20);
 assert.match(empty, /No memories stored yet/);
+
+// 8b. Phase 6 — prune_stale: dry-run finds candidates without deleting; apply removes them.
+const pp = "prune-proj";
+const keep = await store.saveMemory({ project: pp, layer: "long-term", key: "arch", content: "keep me forever" });
+const old = await store.saveMemory({ project: pp, layer: "session", key: "tmp", content: "stale note" });
+db.prepare(`UPDATE memories SET updated_at = datetime('now','-60 days') WHERE id = ?`).run(old.id);
+store.recordFileEvent(pp, "/x/a.ts", "change");
+db.prepare(`UPDATE file_events SET ts = datetime('now','-60 days') WHERE project = ?`).run(pp);
+const dry = store.pruneStale({ project: pp, days: 30, apply: false });
+assert.equal(dry.memories.length, 1, "dry-run finds the stale session memory");
+assert.equal(dry.fileEvents, 1, "dry-run finds the old file event");
+assert.ok(store.getMemory(old.id), "dry-run must NOT delete");
+const applied = store.pruneStale({ project: pp, days: 30, apply: true });
+assert.equal(applied.applied, true, "apply reports applied");
+assert.ok(!store.getMemory(old.id), "apply deletes the stale memory");
+assert.ok(store.getMemory(keep.id), "long-term memory is never pruned");
 
 // 9. scanner + git on this repo
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -181,6 +208,17 @@ writeFileSync(
         ],
       },
     }),
+    JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [
+          {
+            type: "text",
+            text: "We decided to use JWT for sessions.\nNext step: wire the refresh-token endpoint.",
+          },
+        ],
+      },
+    }),
   ].join("\n")
 );
 const parsed = await importClaudeSessions(projPath);
@@ -189,6 +227,11 @@ assert.equal(parsed.length, 1, "should parse one transcript");
 assert.match(parsed[0].summary, /auth login module/, "summary captures the opening prompt");
 assert.ok(parsed[0].files.includes(`${projPath}/auth.ts`), "should capture files touched");
 assert.equal(parsed[0].source, "claude-code-transcript");
+// Phase 4 — richer capture: decisions, next steps, and "where we left off".
+assert.match(parsed[0].decisions ?? "", /JWT/, "should extract a decision line");
+assert.match(parsed[0].nextSteps ?? "", /refresh-token/, "should extract a next-step line");
+assert.match(parsed[0].lastMessage ?? "", /refresh-token endpoint/, "lastMessage = where we left off");
+assert.match(parsed[0].summary, /Left off:/, "summary includes where we left off");
 
 // 13. DELETE — memory delete also purges its embedding (no orphan vector)
 const vecCount = (id: number): number =>
