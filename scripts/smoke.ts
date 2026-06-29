@@ -182,12 +182,21 @@ const packet4 = await store.buildContextPacket(project, 20);
 assert.match(packet4, /Recently Active Files/, "packet should show active files");
 assert.match(packet4, /src\/new-feature\.ts \(new\)/, "new file tagged (new)");
 
-// 11. Phase 4 — session dedupe by external_id (idempotent transcript import)
+// 11. Phase 4/0.2.1 — session dedupe by external_id is last-write-wins (no duplicate row,
+// but the latest capture UPDATES in place so the SessionEnd hook can record final state).
 const s1 = store.saveSession({ project, summary: "imported once", externalId: "abc-123" });
 assert.equal(s1.created, true, "first import creates a session");
-const s2 = store.saveSession({ project, summary: "imported again", externalId: "abc-123" });
+const s2 = store.saveSession({
+  project,
+  summary: "imported again — fuller",
+  nextSteps: "ship it",
+  externalId: "abc-123",
+});
 assert.equal(s2.created, false, "same external_id must not duplicate");
 assert.equal(s1.row.id, s2.row.id, "dedupe returns the existing row");
+assert.equal(store.listSessions(project, 50).filter((r) => r.summary.includes("imported")).length, 1, "no duplicate row");
+assert.match(s2.row.summary, /fuller/, "re-save UPDATES the summary (last-write-wins)");
+assert.equal(s2.row.next_steps, "ship it", "re-save fills in newly-provided fields");
 
 // 12. Phase 4 — parse a synthetic Claude Code transcript
 const fakeHome = join(dirname(fileURLToPath(import.meta.url)), "..", ".smoke-home");
