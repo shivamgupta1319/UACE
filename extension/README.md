@@ -20,6 +20,11 @@ machine and searchable by meaning.
   Explorer.
 - **Works with VS Code Copilot out of the box** — the extension registers a local MCP
   server, so Copilot's agent can read and write your project memory with no config.
+- **Autonomous mode (just install)** — with a one-time consent, UACE auto-registers the
+  MCP server in your host (VS Code, **Cursor**, **Claude Code**, **Antigravity**) and writes
+  rules (`AGENTS.md`, `.cursor/rules`, Copilot instructions) + **Claude Code hooks** so any
+  AI tool recalls context at session start and saves a checkpoint at the end — no manual
+  tool calls. Run **“UACE: Remove Autonomy”** to cleanly undo every change.
 
 ## Requirements
 
@@ -33,14 +38,17 @@ starts instantly and works offline.
 
 ## Use it with Claude Code / Cursor / other tools
 
-Run **“UACE: Copy MCP Config for Claude Code / Cursor”** from the Command Palette. It
-generates a ready-to-paste command/snippet that points those tools at the same local
-memory — so every assistant shares one brain.
+Easiest: run **“UACE: Set Up Autonomy”** — it registers the server for your tools and
+writes the rules/hooks automatically. Prefer to wire it by hand? Run **“UACE: Copy MCP
+Config for Claude Code / Cursor”** for a ready-to-paste snippet that points those tools at
+the same local memory — so every assistant shares one brain.
 
 ## Commands
 
 | Command | What it does |
 |---------|--------------|
+| UACE: Set Up Autonomy | Auto-register the MCP server + write rules/`AGENTS.md` + Claude hooks |
+| UACE: Remove Autonomy | Cleanly remove every UACE-written config entry, rules block, and hook |
 | UACE: Sync Current Project Now | Re-scan + import sessions + watch the open folder |
 | UACE: Continue Previous Session | Open the full project context packet as markdown |
 | UACE: Save Session | Capture a session summary + next steps |

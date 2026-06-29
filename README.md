@@ -33,6 +33,7 @@ shared SQLite store. Any MCP client *pulls* the same context via standard tool c
 
 - 🔒 **Local-first & private** — everything stays on your machine. No cloud, no API keys.
 - 🔁 **Shared across tools** — a fact saved in one assistant is instantly available in every other.
+- 🤖 **Autonomous** — install the extension and it auto-registers the server, and (with consent) makes any AI tool *recall* context at session start and *save* a checkpoint at the end — no manual tool calls.
 - 🧠 **Semantic search** — retrieve memories by *meaning*, with CPU-only offline embeddings.
 - ⚙️ **Zero-config sync** — auto-scan repos, ingest git history, import past sessions, watch live edits.
 - 📦 **One command to run** — `npx uace-mcp`. No build step, no native-module headaches.
@@ -91,6 +92,32 @@ same `npx uace-mcp` server to your MCP settings manually.
 
 ---
 
+## Autonomous mode — *just install the extension*
+
+The manual config above is optional. Install the **UACE — AI Memory** extension and,
+after a one-time consent, it makes the whole loop run by itself:
+
+- **Auto-registers the MCP server** in whatever host you're in — VS Code (Copilot
+  provider), **Cursor** (`vscode.cursor.mcp` API), **Claude Code** (project `.mcp.json`),
+  and **Antigravity** (`~/.gemini/antigravity/mcp_config.json`). All writes are atomic,
+  non-destructive merges.
+- **Writes rules so the AI uses the brain on its own** — a canonical `AGENTS.md` plus
+  host-native files (`.cursor/rules/uace.mdc`, `.github/copilot-instructions.md`) telling
+  the assistant to recall context at session start and save a checkpoint at the end.
+- **Claude Code hooks for truly passive recall/save** — a `SessionStart` hook injects the
+  context packet automatically (no model decision needed); a `SessionEnd` hook saves a
+  session summary from the transcript. Both call the bundled CLI:
+
+  ```bash
+  uace-mcp context <project>                          # prints the context packet (fast, no-embed)
+  uace-mcp save-session --project <p> --from-transcript <path>
+  ```
+
+Run **“UACE: Set Up Autonomy”** any time, or **“UACE: Remove Autonomy”** to cleanly remove
+every UACE-written block, config entry, and hook.
+
+---
+
 ## Install
 
 ```bash
@@ -135,7 +162,16 @@ serves them to assistants through a small set of MCP tools.
 | `watch_project` / `unwatch_project` | Watch a directory for live file changes (the uncommitted-work signal). |
 | `get_active_files` | List recently changed files captured by the watcher. |
 | `import_claude_sessions` | Auto-capture recent Claude Code sessions from local transcripts (idempotent). |
+| `prune_stale` | Find/delete stale working & session memories and old file events (dry-run by default; long-term is never touched). |
 | `list_projects` / `get_dashboard` | Structured JSON snapshots for the VS Code dashboard. |
+| `delete_memory` / `delete_session` / `delete_project` | Permanently remove a memory, session, or whole project (clears embeddings too). |
+
+### MCP prompts
+
+| Prompt | Purpose |
+|--------|---------|
+| `continue-project` | One-click: load `get_project_context` and continue where the last session left off. |
+| `save-checkpoint` | One-click: save a session summary + decisions + next steps. |
 
 ---
 
@@ -155,8 +191,9 @@ can't load, the engine automatically falls back to keyword (FTS) search — noth
   to track create/modify/delete events (ignoring `node_modules`, `.git`, `dist`, …) and
   surfaces them under **Recently Active Files** — the *uncommitted* work signal git can't give you.
 - **Session import** — `import_claude_sessions` reads Claude Code's local transcripts
-  (`~/.claude/projects/<encoded-cwd>/*.jsonl`), extracting the opening prompt, turn counts,
-  and files touched into session memory with no manual `save_session`. It's idempotent
+  (`~/.claude/projects/<encoded-cwd>/*.jsonl`), extracting the opening prompt, key
+  **decisions**, **next steps**, files touched, and the last assistant message
+  (*"where we left off"*) into session memory with no manual `save_session`. It's idempotent
   (deduped by transcript id) and degrades to a no-op when no transcripts exist.
 
 ---
@@ -166,7 +203,8 @@ can't load, the engine automatically falls back to keyword (FTS) search — noth
 A companion sidebar extension lives in [extension/](extension/). It connects to this
 server as an MCP client (no native modules in the editor host) and renders a tree of
 your projects → memories / sessions / active files / commits, plus commands to **Save
-Session** and **Continue Previous Session** (which opens the context packet). See
+Session**, **Continue Previous Session**, and **Set Up / Remove Autonomy** (see
+[Autonomous mode](#autonomous-mode--just-install-the-extension) above). See
 [extension/README.md](extension/README.md) for details.
 
 ---
@@ -204,9 +242,11 @@ npm run dev        # run the server over stdio (tsx)
 - [x] Phase 3 — sqlite-vec semantic search
 - [x] Phase 4 — file watcher + auto session capture
 - [x] Phase 5 — VS Code dashboard — **MVP complete**
+- [x] Phase 6 — **autonomy**: per-host MCP auto-registration, rules/`AGENTS.md`,
+  Claude Code hooks, CLI mode, richer capture, freshness-aware packet, `prune_stale`
 
 **Next:** React webview (richer timeline), more transcript sources (Cursor & others),
-remote/HTTP transport, packaged `.vsix`.
+remote/HTTP transport, team/cross-machine sync.
 
 ---
 
