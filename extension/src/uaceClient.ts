@@ -128,6 +128,16 @@ export class UaceClient {
     return this.call("save_session", args);
   }
 
+  async deleteMemory(id: number): Promise<string> {
+    return this.call("delete_memory", { id });
+  }
+  async deleteSession(id: number): Promise<string> {
+    return this.call("delete_session", { id });
+  }
+  async deleteProject(project: string): Promise<string> {
+    return this.call("delete_project", { project });
+  }
+
   // --- auto-onboard the open workspace ---
   async scanProject(path: string, project: string): Promise<string> {
     return this.call("scan_project", { path, project });

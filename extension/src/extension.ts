@@ -10,7 +10,16 @@ type Node =
   | { kind: "message"; label: string }
   | { kind: "project"; project: string; description: string }
   | { kind: "category"; project: string; category: Category; label: string }
-  | { kind: "leaf"; label: string; description?: string; tooltip?: string };
+  | {
+      kind: "leaf";
+      label: string;
+      description?: string;
+      tooltip?: string;
+      // Set on individually-deletable rows so the context menu can target them.
+      itemKind?: "memory" | "session";
+      id?: number;
+      project?: string;
+    };
 
 type Category = "working" | "long-term" | "session" | "sessions" | "files" | "commits";
 
@@ -84,6 +93,8 @@ class BrainProvider implements vscode.TreeDataProvider<Node> {
         const i = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.None);
         i.description = node.description;
         i.tooltip = node.tooltip ?? node.label;
+        if (node.itemKind === "memory") i.contextValue = "uaceMemoryItem";
+        else if (node.itemKind === "session") i.contextValue = "uaceSessionItem";
         return i;
       }
     }
@@ -150,6 +161,9 @@ class BrainProvider implements vscode.TreeDataProvider<Node> {
         label: m.key ?? m.content.slice(0, 40),
         description: m.key ? m.content.slice(0, 60) : undefined,
         tooltip: m.content,
+        itemKind: "memory",
+        id: m.id,
+        project,
       }));
     }
     if (category === "sessions") {
@@ -158,6 +172,9 @@ class BrainProvider implements vscode.TreeDataProvider<Node> {
         label: s.title ?? s.summary.slice(0, 50),
         description: s.created_at?.slice(0, 10),
         tooltip: `${s.summary}${s.next_steps ? `\n\nNext: ${s.next_steps}` : ""}`,
+        itemKind: "session",
+        id: s.id,
+        project,
       }));
     }
     if (category === "files") {
@@ -186,6 +203,45 @@ async function pickProject(client: UaceClient): Promise<string | undefined> {
     projects.map((p) => p.name),
     { placeHolder: "Select a project" }
   );
+}
+
+/**
+ * Right-click "Delete" handler for the tree. Confirms with a modal (deletes are
+ * irreversible), calls the matching MCP delete tool, then refreshes. Works for
+ * memory leaves, session leaves, and whole project nodes.
+ */
+async function deleteNode(provider: BrainProvider, node?: Node): Promise<void> {
+  if (!node) return;
+  const client = provider.getClient();
+  if (!client) {
+    vscode.window.showWarningMessage(`UACE: not ready — ${startupMessage}`);
+    return;
+  }
+
+  let prompt: string;
+  let run: () => Promise<string>;
+  if (node.kind === "leaf" && node.itemKind === "memory" && node.id != null) {
+    prompt = `Delete this memory permanently?\n\n${node.tooltip ?? node.label}`;
+    run = () => client.deleteMemory(node.id!);
+  } else if (node.kind === "leaf" && node.itemKind === "session" && node.id != null) {
+    prompt = `Delete this session permanently?\n\n${node.label}`;
+    run = () => client.deleteSession(node.id!);
+  } else if (node.kind === "project") {
+    prompt = `Delete the ENTIRE project "${node.project}" and all its memories, sessions, files and commits? This cannot be undone.`;
+    run = () => client.deleteProject(node.project);
+  } else {
+    return;
+  }
+
+  const choice = await vscode.window.showWarningMessage(prompt, { modal: true }, "Delete");
+  if (choice !== "Delete") return;
+  try {
+    const result = await run();
+    vscode.window.showInformationMessage(`UACE: ${result}`);
+    provider.refresh();
+  } catch (err) {
+    vscode.window.showErrorMessage(`UACE: delete failed — ${(err as Error).message}`);
+  }
 }
 
 /** Local filesystem workspace folders only. */
@@ -284,6 +340,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("uace.refresh", () => provider.refresh()),
     vscode.commands.registerCommand("uace.syncNow", () => autoSync(provider, true)),
     vscode.commands.registerCommand("uace.copyMcpConfig", () => copyMcpConfig()),
+    vscode.commands.registerCommand("uace.delete", (node?: Node) => deleteNode(provider, node)),
 
     vscode.workspace.onDidChangeWorkspaceFolders(() => autoSync(provider)),
     vscode.workspace.onDidChangeConfiguration((e) => {
