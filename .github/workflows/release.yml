@@ -6,6 +6,8 @@ name: Release
 # Required repository secrets:
 #   NPM_TOKEN  - npm automation token (npmjs.com -> Access Tokens)
 #   VSCE_PAT   - Azure DevOps PAT with Marketplace > Manage scope
+#   OVSX_PAT   - Open VSX access token (open-vsx.org -> Settings -> Access Tokens),
+#                lets Cursor / Antigravity / VSCodium discover the extension.
 #
 # The npm package is published first because the extension's first-run
 # bootstrap installs that exact version.
@@ -40,8 +42,18 @@ jobs:
           node-version: 20
       - working-directory: extension
         run: npm install
+      # Package once, then publish the SAME .vsix to both marketplaces so the
+      # bundle is byte-identical across registries.
+      - name: Package extension
+        working-directory: extension
+        run: npx --yes @vscode/vsce package -o uace-dashboard.vsix
       - name: Publish to VS Code Marketplace
         working-directory: extension
-        run: npx --yes @vscode/vsce publish -p "$VSCE_PAT"
+        run: npx --yes @vscode/vsce publish --packagePath uace-dashboard.vsix -p "$VSCE_PAT"
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      - name: Publish to Open VSX (Cursor / Antigravity / VSCodium)
+        working-directory: extension
+        run: npx --yes ovsx publish uace-dashboard.vsix -p "$OVSX_PAT"
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
