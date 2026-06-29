@@ -374,7 +374,12 @@ async function maybeSetupAutonomy(
  *  Cursor/Claude Code doesn't hit the one-time download inside the host's MCP timeout. */
 function prewarm(project: string): void {
   if (!runtime?.npmCli) return;
-  const env: NodeJS.ProcessEnv = { ...process.env, UACE_NO_EMBED: "1" };
+  // Put node's bin dir on PATH so `npm exec`'s child node/npx resolve in GUI hosts.
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    UACE_NO_EMBED: "1",
+    PATH: `${path.dirname(runtime.node)}${path.delimiter}${process.env.PATH ?? ""}`,
+  };
   execFile(
     runtime.node,
     [runtime.npmCli, "exec", "-y", "uace-mcp", "--", "context", project],

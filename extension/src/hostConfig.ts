@@ -21,9 +21,24 @@ export interface McpServerSpec {
   env?: Record<string, string>;
 }
 
-/** Portable stdio entry written into file-based host configs. */
+/**
+ * Portable stdio entry (`npx -y uace-mcp`). Good for hosts that run in a real
+ * terminal (Claude Code) where `npx` is on PATH and we want latest-on-npm.
+ */
 export function npxServer(env?: Record<string, string>): McpServerSpec {
   const spec: McpServerSpec = { command: "npx", args: ["-y", "uace-mcp"] };
+  if (env && Object.keys(env).length) spec.env = env;
+  return spec;
+}
+
+/**
+ * Absolute stdio entry (`<node> <serverEntry>`). Required for GUI hosts
+ * (Antigravity, Cursor file fallback) which launch MCP servers WITHOUT node/npx
+ * on PATH — `npx`-based configs fail there with "npx: not found". Mirrors how the
+ * VS Code/Cursor registration APIs already launch the server.
+ */
+export function localServer(node: string, serverEntry: string, env?: Record<string, string>): McpServerSpec {
+  const spec: McpServerSpec = { command: node, args: [serverEntry] };
   if (env && Object.keys(env).length) spec.env = env;
   return spec;
 }

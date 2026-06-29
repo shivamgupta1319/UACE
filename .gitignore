@@ -13,3 +13,8 @@ out/
 # scratch output from the "Copy MCP Config" command
 Connect UACE to other AI tools.md
 .env
+
+# Claude Code local hooks/settings — machine-specific (absolute hook paths),
+# regenerated per-machine by the extension. Portable rules (AGENTS.md,
+# .cursor/rules, .github/copilot-instructions.md, .mcp.json) stay tracked.
+.claude/

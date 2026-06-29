@@ -4,6 +4,7 @@ import {
   antigravityMcpPath,
   claudeProjectMcpPath,
   cursorMcpPath,
+  localServer,
   npxServer,
   removeClaudeHooks,
   removeMcpServer,
@@ -61,7 +62,11 @@ function registerCursorApi(node: string, serverEntry: string, env: Record<string
 export function setupAutonomy(ctx: AutonomyContext): AutonomyReport {
   const lines: string[] = [];
   let needsReload = false;
-  const server = npxServer(ctx.env);
+  // GUI hosts launch MCP servers WITHOUT node/npx on PATH, so their file configs
+  // must use absolute paths. Claude Code runs in a terminal (PATH present) and we
+  // want it decoupled from the extension's install, so it keeps `npx`.
+  const localSpec = localServer(ctx.node, ctx.serverEntry, ctx.env);
+  const npxSpec = npxServer(ctx.env);
 
   // --- MCP registration (current host) ---
   switch (ctx.host) {
@@ -72,14 +77,14 @@ export function setupAutonomy(ctx: AutonomyContext): AutonomyReport {
       if (registerCursorApi(ctx.node, ctx.serverEntry, ctx.env)) {
         lines.push("MCP: registered via Cursor API (no restart needed).");
       } else {
-        upsertMcpServer(cursorMcpPath(), server);
+        upsertMcpServer(cursorMcpPath(), localSpec);
         lines.push(`MCP: merged into ${cursorMcpPath()} — reload Cursor to connect.`);
         needsReload = true;
       }
       break;
     case "antigravity": {
       const p = antigravityMcpPath();
-      upsertMcpServer(p, server);
+      upsertMcpServer(p, localSpec);
       lines.push(`MCP: merged into ${p} — reload Antigravity to connect.`);
       needsReload = true;
       break;
@@ -92,7 +97,7 @@ export function setupAutonomy(ctx: AutonomyContext): AutonomyReport {
   for (const root of ctx.workspaceRoots) {
     const project = path.basename(root);
     // Claude Code project-scoped server (works whenever `claude` runs in this folder).
-    upsertMcpServer(claudeProjectMcpPath(root), server);
+    upsertMcpServer(claudeProjectMcpPath(root), npxSpec);
     // Canonical cross-tool rules + host-native rules.
     writeRulesMarkdown(path.join(root, "AGENTS.md"));
     writeRulesMarkdown(path.join(root, ".github", "copilot-instructions.md"));

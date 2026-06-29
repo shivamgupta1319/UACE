@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname, delimiter } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Runtime } from "./nodeResolver";
@@ -8,7 +8,7 @@ import { Runtime } from "./nodeResolver";
 const execFileAsync = promisify(execFile);
 
 export const SERVER_PACKAGE = "uace-mcp";
-export const SERVER_VERSION = "0.2.2";
+export const SERVER_VERSION = "0.2.3";
 
 /**
  * Ensure the UACE MCP server is available and return the path to its entry.
@@ -74,10 +74,17 @@ async function installServer(root: string, runtime: Runtime, packageSpec: string
       cancellable: false,
     },
     async () => {
+      // Native postinstalls (sharp, better-sqlite3) shell out to bare `node`/`npm`,
+      // so the resolved node's bin dir MUST be on PATH — GUI hosts (Antigravity,
+      // Cursor) often launch without it, causing "node: not found" (code 127).
+      const env = {
+        ...process.env,
+        PATH: `${dirname(runtime.node)}${delimiter}${process.env.PATH ?? ""}`,
+      };
       await execFileAsync(
         runtime.node,
         [runtime.npmCli!, "install", packageSpec, "--prefix", root, "--no-audit", "--no-fund", "--loglevel=error"],
-        { cwd: root, maxBuffer: 1024 * 1024 * 64, timeout: 10 * 60 * 1000 }
+        { cwd: root, env, maxBuffer: 1024 * 1024 * 64, timeout: 10 * 60 * 1000 }
       );
     }
   );
