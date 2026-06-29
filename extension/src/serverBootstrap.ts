@@ -8,7 +8,7 @@ import { Runtime } from "./nodeResolver";
 const execFileAsync = promisify(execFile);
 
 export const SERVER_PACKAGE = "uace-mcp";
-export const SERVER_VERSION = "0.2.0";
+export const SERVER_VERSION = "0.2.1";
 
 /**
  * Ensure the UACE MCP server is available and return the path to its entry.

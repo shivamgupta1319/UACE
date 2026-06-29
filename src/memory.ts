@@ -321,12 +321,37 @@ export class MemoryStore {
   }): { row: SessionRow; created: boolean } {
     this.ensureProject(input.project);
 
-    // Dedupe imported transcripts: skip if this external_id already exists.
+    // Transcript sessions are keyed by external_id. The same session is captured
+    // repeatedly as it grows (auto-import mid-session, then the SessionEnd hook),
+    // so we UPDATE in place to last-write-wins: the latest capture is the most
+    // complete (final summary + decisions + "where we left off").
     if (input.externalId) {
       const existing = this.db
         .prepare(`SELECT * FROM sessions WHERE project = ? AND external_id = ?`)
         .get(input.project, input.externalId) as SessionRow | undefined;
-      if (existing) return { row: existing, created: false };
+      if (existing) {
+        this.db
+          .prepare(
+            `UPDATE sessions
+                SET title = ?, summary = ?, prompt = ?, decisions = ?, files = ?,
+                    next_steps = ?, source = ?
+              WHERE id = ?`
+          )
+          .run(
+            input.title ?? existing.title,
+            input.summary,
+            input.prompt ?? existing.prompt,
+            input.decisions ?? existing.decisions,
+            input.files?.length ? input.files.join(",") : existing.files,
+            input.nextSteps ?? existing.next_steps,
+            input.source ?? existing.source,
+            existing.id
+          );
+        const row = this.db
+          .prepare(`SELECT * FROM sessions WHERE id = ?`)
+          .get(existing.id) as SessionRow;
+        return { row, created: false };
+      }
     }
 
     const info = this.db
