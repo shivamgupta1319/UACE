@@ -447,7 +447,7 @@ export class MemoryStore {
       .prepare(
         `SELECT * FROM sessions
           WHERE project = ?
-          ORDER BY created_at DESC
+          ORDER BY created_at DESC, id DESC
           LIMIT ?`
       )
       .all(project, limit) as SessionRow[];
