@@ -58,6 +58,14 @@
         "title": "UACE: Copy MCP Config for Claude Code / Cursor"
       },
       {
+        "command": "uace.setupAutonomy",
+        "title": "UACE: Set Up Autonomy (auto-register + rules + hooks)"
+      },
+      {
+        "command": "uace.removeAutonomy",
+        "title": "UACE: Remove Autonomy (clean up config + rules + hooks)"
+      },
+      {
         "command": "uace.delete",
         "title": "Delete",
         "icon": "$(trash)"
