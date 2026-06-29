@@ -190,6 +190,61 @@ assert.match(parsed[0].summary, /auth login module/, "summary captures the openi
 assert.ok(parsed[0].files.includes(`${projPath}/auth.ts`), "should capture files touched");
 assert.equal(parsed[0].source, "claude-code-transcript");
 
+// 13. DELETE — memory delete also purges its embedding (no orphan vector)
+const vecCount = (id: number): number =>
+  (db.prepare(`SELECT COUNT(*) AS n FROM vec_memories WHERE memory_id = ?`).get(BigInt(id)) as { n: number }).n;
+
+const delMem = await store.saveMemory({
+  project,
+  layer: "long-term",
+  key: "to-delete",
+  content: "ephemeral jwt token note to be deleted",
+});
+assert.equal(vecCount(delMem.id), 1, "saved memory should have an embedding row");
+const removed = store.deleteMemory(delMem.id);
+assert.equal(removed, true, "deleteMemory should report a removed row");
+assert.equal(store.getMemory(delMem.id), undefined, "memory row should be gone");
+assert.equal(vecCount(delMem.id), 0, "embedding must be purged (no orphan vector)");
+assert.ok(
+  !store.searchMemory({ project, query: "ephemeral", limit: 10 }).some((r) => r.id === delMem.id),
+  "FTS should no longer return the deleted memory"
+);
+assert.ok(
+  !(await store.semanticSearch({ project, query: "ephemeral jwt token", limit: 10 }))?.some(
+    (r) => r.id === delMem.id
+  ),
+  "semantic search should no longer return the deleted memory"
+);
+assert.equal(store.deleteMemory(delMem.id), false, "deleting a missing memory returns false");
+
+// 14. DELETE — session delete
+const delSess = store.saveSession({ project, summary: "session to delete" });
+assert.equal(store.deleteSession(delSess.row.id), true, "deleteSession should remove the row");
+assert.ok(
+  !store.listSessions(project, 50).some((s) => s.id === delSess.row.id),
+  "deleted session should not be listed"
+);
+
+// 15. DELETE — project cascade purges every table (and embeddings)
+const purgeProj = "throwaway-project";
+const pm = await store.saveMemory({ project: purgeProj, layer: "long-term", key: "k", content: "stripe billing note" });
+store.saveSession({ project: purgeProj, summary: "a session" });
+store.recordFileEvent(purgeProj, "src/x.ts", "change");
+store.saveCommits(purgeProj, [
+  { hash: "deadbeef", author: "me", date: "2026-01-01", message: "init", files: ["a.ts"] },
+]);
+assert.equal(vecCount(pm.id), 1, "project memory should be embedded before purge");
+const purged = store.deleteProject(purgeProj);
+assert.equal(purged.memories, 1, "one memory purged");
+assert.equal(purged.sessions, 1, "one session purged");
+assert.equal(purged.files, 1, "one file event purged");
+assert.equal(purged.commits, 1, "one commit purged");
+assert.equal(vecCount(pm.id), 0, "project memory embeddings must be purged");
+assert.ok(
+  !store.listProjects().some((p) => p.name === purgeProj),
+  "purged project should be gone from listProjects"
+);
+
 console.log(
-  `✓ smoke passed — save/upsert/FTS + semantic + reindex + session/context + scan(${scan.languages.join("/")}) + git(${commits.length}) + watcher/activeFiles + transcript-import`
+  `✓ smoke passed — save/upsert/FTS + semantic + reindex + session/context + scan(${scan.languages.join("/")}) + git(${commits.length}) + watcher/activeFiles + transcript-import + delete(memory/session/project)`
 );
