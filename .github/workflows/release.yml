@@ -3,9 +3,13 @@ name: Release
 # Tag a version (e.g. `git tag v0.1.0 && git push --tags`) to publish both
 # the npm server package and the VS Code extension.
 #
-# Required repository secrets:
-#   NPM_TOKEN  - npm automation token (npmjs.com -> Access Tokens)
-#   VSCE_PAT   - Azure DevOps PAT with Marketplace > Manage scope
+# npm publishes via Trusted Publishing (OIDC) — NO npm token needed. Configure the
+# trusted publisher on npmjs.com (package -> Settings -> Trusted Publisher ->
+# GitHub Actions: shivamgupta1319/UACE, workflow release.yml).
+#
+# Required repository secrets (extension only):
+#   VSCE_PAT   - Azure DevOps PAT with Marketplace > Manage scope (optional; MS
+#                Marketplace step is skipped when unset and updated manually).
 #   OVSX_PAT   - Open VSX access token (open-vsx.org -> Settings -> Access Tokens),
 #                lets Cursor / Antigravity / VSCodium discover the extension.
 #
@@ -20,6 +24,9 @@ on:
 jobs:
   publish-npm:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write # required for npm Trusted Publishing (OIDC)
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,9 +35,9 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - run: npm install
       - run: npm run build
+      # Trusted Publishing requires npm >= 11.5.1 (Node 20 ships npm 10).
+      - run: npm install -g npm@latest
       - run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-extension:
     needs: publish-npm
