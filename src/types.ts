@@ -184,3 +184,19 @@ export const getRecentChangesSchema = {
   project: projectField,
   limit: z.number().int().positive().max(50).default(10),
 };
+
+export const deleteMemorySchema = {
+  id: z
+    .number()
+    .int()
+    .positive()
+    .describe("Memory id to delete (from get_dashboard or search results)."),
+};
+
+export const deleteSessionSchema = {
+  id: z.number().int().positive().describe("Session id to delete."),
+};
+
+export const deleteProjectSchema = {
+  project: projectField,
+};

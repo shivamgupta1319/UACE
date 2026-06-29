@@ -93,6 +93,62 @@ export class MemoryStore {
       | undefined;
   }
 
+  /** Clear a memory's embedding from the vec table (no-op if disabled). */
+  private deleteEmbedding(id: number): void {
+    if (!this.vectorsEnabled) return;
+    this.db.prepare(`DELETE FROM vec_memories WHERE memory_id = ?`).run(BigInt(id));
+  }
+
+  /**
+   * Delete one memory by id. Also clears its embedding from vec_memories — the
+   * FTS mirror auto-cleans via the memories_ad trigger, but vec0 has no such
+   * trigger, so an orphan vector would otherwise linger in semantic search.
+   * Returns true if a row was removed.
+   */
+  deleteMemory(id: number): boolean {
+    const drop = this.db.transaction((mid: number) => {
+      this.deleteEmbedding(mid);
+      return this.db.prepare(`DELETE FROM memories WHERE id = ?`).run(mid).changes;
+    });
+    return drop(id) > 0;
+  }
+
+  /** Delete one session by id. Sessions have no embeddings/FTS. */
+  deleteSession(id: number): boolean {
+    return this.db.prepare(`DELETE FROM sessions WHERE id = ?`).run(id).changes > 0;
+  }
+
+  /**
+   * Delete a project and everything under it: memories (+ their embeddings),
+   * sessions, file events and ingested commits, then the project row itself.
+   * Returns per-table counts. Embeddings are cleared first because vec0 has no
+   * delete trigger.
+   */
+  deleteProject(project: string): {
+    memories: number;
+    sessions: number;
+    files: number;
+    commits: number;
+  } {
+    const purge = this.db.transaction((name: string) => {
+      if (this.vectorsEnabled) {
+        this.db
+          .prepare(
+            `DELETE FROM vec_memories
+              WHERE memory_id IN (SELECT id FROM memories WHERE project = ?)`
+          )
+          .run(name);
+      }
+      const memories = this.db.prepare(`DELETE FROM memories WHERE project = ?`).run(name).changes;
+      const sessions = this.db.prepare(`DELETE FROM sessions WHERE project = ?`).run(name).changes;
+      const files = this.db.prepare(`DELETE FROM file_events WHERE project = ?`).run(name).changes;
+      const commits = this.db.prepare(`DELETE FROM commits WHERE project = ?`).run(name).changes;
+      this.db.prepare(`DELETE FROM projects WHERE name = ?`).run(name);
+      return { memories, sessions, files, commits };
+    });
+    return purge(project);
+  }
+
   /** Full-text search within a project, optionally scoped to one layer. */
   searchMemory(input: {
     project: string;

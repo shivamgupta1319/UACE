@@ -26,6 +26,9 @@ import {
   importClaudeSessionsSchema,
   listProjectsSchema,
   getDashboardSchema,
+  deleteMemorySchema,
+  deleteSessionSchema,
+  deleteProjectSchema,
 } from "./types.js";
 
 // Guard the MCP stdio channel: any stray library writes to stdout would corrupt
@@ -50,7 +53,7 @@ const watcher = new FileWatcher();
 
 const server = new McpServer({
   name: "uace",
-  version: "0.1.2",
+  version: "0.1.3",
 });
 
 const text = (s: string) => ({ content: [{ type: "text" as const, text: s }] });
@@ -318,6 +321,48 @@ server.registerTool(
     inputSchema: getDashboardSchema,
   },
   async ({ project }) => text(JSON.stringify(store.dashboard(project)))
+);
+
+server.registerTool(
+  "delete_memory",
+  {
+    title: "Delete Memory",
+    description:
+      "Permanently delete a single memory by its id (irreversible). Also clears its semantic embedding so it stops appearing in search. Get ids from get_dashboard or search results.",
+    inputSchema: deleteMemorySchema,
+  },
+  async ({ id }) =>
+    text(store.deleteMemory(id) ? `Deleted memory #${id}.` : `No memory #${id} found.`)
+);
+
+server.registerTool(
+  "delete_session",
+  {
+    title: "Delete Session",
+    description:
+      "Permanently delete a single session summary by its id (irreversible). Get ids from get_dashboard.",
+    inputSchema: deleteSessionSchema,
+  },
+  async ({ id }) =>
+    text(store.deleteSession(id) ? `Deleted session #${id}.` : `No session #${id} found.`)
+);
+
+server.registerTool(
+  "delete_project",
+  {
+    title: "Delete Project",
+    description:
+      "Permanently delete an ENTIRE project and everything under it — all memories (and their embeddings), sessions, recorded file activity, and ingested commits (irreversible). Use with care.",
+    inputSchema: deleteProjectSchema,
+  },
+  async ({ project }) => {
+    const n = store.deleteProject(project);
+    const total = n.memories + n.sessions + n.files + n.commits;
+    if (total === 0) return text(`No project "${project}" found (nothing deleted).`);
+    return text(
+      `Deleted project "${project}" (${n.memories} memories, ${n.sessions} sessions, ${n.files} files, ${n.commits} commits).`
+    );
+  }
 );
 
 async function shutdown(): Promise<void> {
