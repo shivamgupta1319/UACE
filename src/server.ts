@@ -6,8 +6,9 @@ import { join } from "node:path";
 import { openDb, tryEnableVectors } from "./db.js";
 import { MemoryStore } from "./memory.js";
 import { createEmbedder } from "./embedder.js";
-import { scanProject } from "./scanner.js";
+import { scanProject, scanToMemories } from "./scanner.js";
 import { readRecentCommits } from "./git.js";
+import { runCli, CLI_SUBCOMMANDS } from "./cli.js";
 import { FileWatcher } from "./watcher.js";
 import { importClaudeSessions } from "./transcripts.js";
 import { basename } from "node:path";
@@ -44,6 +45,15 @@ console.log = (...args: unknown[]) => console.error(...args);
  * with UACE_DB to point at a per-machine or per-project store.
  */
 const DB_PATH = process.env.UACE_DB ?? join(homedir(), ".uace", "memory.db");
+
+// CLI mode: `uace-mcp <context|save-session|sync> …` runs a one-shot command and
+// exits, reusing the same shared DB. Anything else (incl. no args) starts the MCP
+// stdio server below. Top-level await guarantees the server bootstrap never runs
+// in CLI mode. (Embeddings stay lazy, so the server consts cost nothing here.)
+const cliSub = process.argv[2];
+if (cliSub && CLI_SUBCOMMANDS.has(cliSub)) {
+  process.exit(await runCli(process.argv.slice(2)));
+}
 
 const db = openDb(DB_PATH);
 const embedder = createEmbedder();
@@ -156,14 +166,9 @@ server.registerTool(
     const scan = await scanProject(path, project);
     const proj = scan.project;
 
-    if (scan.languages.length)
-      await store.saveMemory({ project: proj, layer: "long-term", key: "languages", content: `Languages/ecosystems: ${scan.languages.join(", ")}.`, tags: ["scan"] });
-    if (scan.frameworks.length)
-      await store.saveMemory({ project: proj, layer: "long-term", key: "frameworks", content: `Frameworks: ${scan.frameworks.join(", ")}.`, tags: ["scan"] });
-    if (scan.structure.length)
-      await store.saveMemory({ project: proj, layer: "long-term", key: "structure", content: `Top-level directories: ${scan.structure.join(", ")}.`, tags: ["scan"] });
-    if (scan.readme)
-      await store.saveMemory({ project: proj, layer: "long-term", key: "readme", content: `README excerpt: ${scan.readme}`, tags: ["scan"] });
+    for (const mem of scanToMemories(scan)) {
+      await store.saveMemory({ project: proj, ...mem });
+    }
 
     const commits = await readRecentCommits(path, commitLimit);
     const added = commits.length ? store.saveCommits(proj, commits) : 0;

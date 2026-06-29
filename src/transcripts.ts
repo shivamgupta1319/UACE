@@ -80,7 +80,10 @@ export async function importClaudeSessions(
   return sessions;
 }
 
-async function parseTranscript(file: string, externalId: string): Promise<ParsedSession | null> {
+export async function parseTranscript(
+  file: string,
+  externalId: string
+): Promise<ParsedSession | null> {
   const raw = await readFile(file, "utf8");
   const files = new Set<string>();
   let firstPrompt = "";

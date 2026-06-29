@@ -9,6 +9,31 @@ export interface ScanResult {
   readme: string | null; // short excerpt
 }
 
+/** A long-term memory derived from a scan, ready for `MemoryStore.saveMemory`. */
+export interface ScanMemory {
+  layer: "long-term";
+  key: string;
+  content: string;
+  tags: string[];
+}
+
+/**
+ * Turn a scan into the long-term memories it implies. Shared by the MCP
+ * `scan_project` tool and the `uace-mcp sync` CLI so both ingest identically.
+ */
+export function scanToMemories(scan: ScanResult): ScanMemory[] {
+  const out: ScanMemory[] = [];
+  if (scan.languages.length)
+    out.push({ layer: "long-term", key: "languages", content: `Languages/ecosystems: ${scan.languages.join(", ")}.`, tags: ["scan"] });
+  if (scan.frameworks.length)
+    out.push({ layer: "long-term", key: "frameworks", content: `Frameworks: ${scan.frameworks.join(", ")}.`, tags: ["scan"] });
+  if (scan.structure.length)
+    out.push({ layer: "long-term", key: "structure", content: `Top-level directories: ${scan.structure.join(", ")}.`, tags: ["scan"] });
+  if (scan.readme)
+    out.push({ layer: "long-term", key: "readme", content: `README excerpt: ${scan.readme}`, tags: ["scan"] });
+  return out;
+}
+
 /** Manifest file -> ecosystem/language it implies. */
 const MANIFEST_LANGUAGES: Record<string, string> = {
   "package.json": "JavaScript/Node",
