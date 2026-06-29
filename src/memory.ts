@@ -125,6 +125,7 @@ export class MemoryStore {
    * delete trigger.
    */
   deleteProject(project: string): {
+    existed: boolean;
     memories: number;
     sessions: number;
     files: number;
@@ -143,8 +144,11 @@ export class MemoryStore {
       const sessions = this.db.prepare(`DELETE FROM sessions WHERE project = ?`).run(name).changes;
       const files = this.db.prepare(`DELETE FROM file_events WHERE project = ?`).run(name).changes;
       const commits = this.db.prepare(`DELETE FROM commits WHERE project = ?`).run(name).changes;
-      this.db.prepare(`DELETE FROM projects WHERE name = ?`).run(name);
-      return { memories, sessions, files, commits };
+      // The project row itself is the source of truth for existence: an
+      // already-emptied project still has a row, and removing it is a real
+      // deletion even when every content count is zero.
+      const existed = this.db.prepare(`DELETE FROM projects WHERE name = ?`).run(name).changes > 0;
+      return { existed, memories, sessions, files, commits };
     });
     return purge(project);
   }

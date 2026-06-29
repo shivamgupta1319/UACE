@@ -53,7 +53,7 @@ const watcher = new FileWatcher();
 
 const server = new McpServer({
   name: "uace",
-  version: "0.1.3",
+  version: "0.1.4",
 });
 
 const text = (s: string) => ({ content: [{ type: "text" as const, text: s }] });
@@ -358,7 +358,7 @@ server.registerTool(
   async ({ project }) => {
     const n = store.deleteProject(project);
     const total = n.memories + n.sessions + n.files + n.commits;
-    if (total === 0) return text(`No project "${project}" found (nothing deleted).`);
+    if (!n.existed && total === 0) return text(`No project "${project}" found (nothing deleted).`);
     return text(
       `Deleted project "${project}" (${n.memories} memories, ${n.sessions} sessions, ${n.files} files, ${n.commits} commits).`
     );

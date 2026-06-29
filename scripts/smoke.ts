@@ -244,6 +244,22 @@ assert.ok(
   !store.listProjects().some((p) => p.name === purgeProj),
   "purged project should be gone from listProjects"
 );
+assert.equal(purged.existed, true, "deleteProject should report the project row existed");
+
+// 15b. DELETE — emptied-but-existing project still counts as a real deletion
+const emptyProj = "emptied-project";
+const ep = await store.saveMemory({ project: emptyProj, layer: "long-term", key: "only", content: "sole memory" });
+store.deleteMemory(ep.id); // leaves an empty project row behind
+assert.ok(store.listProjects().some((p) => p.name === emptyProj), "empty project row should remain");
+const emptied = store.deleteProject(emptyProj);
+assert.equal(emptied.existed, true, "deleting an emptied project must report existed=true");
+assert.equal(emptied.memories, 0, "emptied project has no memories to count");
+assert.ok(
+  !store.listProjects().some((p) => p.name === emptyProj),
+  "emptied project row should be removed"
+);
+// Deleting a truly-absent project reports existed=false.
+assert.equal(store.deleteProject("never-existed").existed, false, "absent project reports existed=false");
 
 console.log(
   `✓ smoke passed — save/upsert/FTS + semantic + reindex + session/context + scan(${scan.languages.join("/")}) + git(${commits.length}) + watcher/activeFiles + transcript-import + delete(memory/session/project)`
