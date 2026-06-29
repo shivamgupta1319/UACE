@@ -422,80 +422,139 @@ export class MemoryStore {
    * most recent session. This is what an assistant pulls at session start so
    * the user doesn't have to re-explain the project.
    */
+  /**
+   * Build the context packet. The DEFAULT (no `query`) is non-semantic
+   * (recency + priority), so the hot recall path never triggers embedding
+   * cold-start. A `query` opts into a semantic "Most Relevant" section.
+   *
+   * Sections are emitted in priority order and the whole packet is capped at
+   * `maxChars` (lowest-priority sections drop first) so it stays useful as the
+   * brain grows. Each memory shows its age; stale working memory is flagged.
+   */
   async buildContextPacket(
     project: string,
     limitPerLayer: number,
-    query?: string
+    query?: string,
+    maxChars = 6000
   ): Promise<string> {
-    const sections: string[] = [`# Project Context: ${project}`];
-
-    // Optional semantic focus: most relevant memories for a specific question.
-    if (query) {
-      const relevant = await this.semanticSearch({
-        project,
-        query,
-        limit: Math.min(limitPerLayer, 8),
-      });
-      if (relevant && relevant.length) {
-        sections.push(`\n## Most Relevant to: "${query}"`);
-        for (const r of relevant) {
-          const label = r.key ? `**${r.key}**: ` : "";
-          sections.push(`- [${r.layer}] ${label}${r.content}`);
-        }
-      }
-    }
-
-    const layerTitles: Record<MemoryLayer, string> = {
-      "long-term": "Long-Term Memory (architecture, standards, stack)",
-      working: "Working Memory (current task, TODOs, branch)",
-      session: "Session Memory (recent decisions, next steps)",
+    const seen = new Set<string>();
+    const fresh = (s: string): boolean => {
+      const k = s.replace(/\s+/g, " ").trim().toLowerCase();
+      if (!k || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    };
+    const memLine = (r: MemoryRow, opts: { flagStale?: boolean } = {}): string => {
+      const label = r.key ? `**${r.key}**: ` : "";
+      const age = formatAge(r.updated_at);
+      const stale = opts.flagStale && ageDays(r.updated_at) > 14 ? " ⚠️ may be stale" : "";
+      return `- ${label}${r.content}${age ? ` _(${age})_` : ""}${stale}`;
     };
 
-    for (const layer of MEMORY_LAYERS) {
-      const rows = this.recentByLayer(project, layer, limitPerLayer);
-      if (!rows.length) continue;
-      sections.push(`\n## ${layerTitles[layer]}`);
-      for (const r of rows) {
-        const label = r.key ? `**${r.key}**: ` : "";
-        sections.push(`- ${label}${r.content}`);
+    // Priority-ordered groups (highest first).
+    const groups: { title: string; lines: string[] }[] = [];
+
+    // 1. Most relevant — semantic, opt-in only.
+    if (query) {
+      const relevant = await this.semanticSearch({ project, query, limit: Math.min(limitPerLayer, 8) });
+      if (relevant && relevant.length) {
+        // Highlight view — additive, so it does NOT consume the dedupe budget of
+        // the canonical layer sections below.
+        groups.push({
+          title: `Most Relevant to: "${query}"`,
+          lines: relevant.map((r) => memLine(r)),
+        });
       }
     }
 
-    const commits = this.recentCommits(project, 5);
-    if (commits.length) {
-      sections.push(`\n## Recent Changes (git)`);
-      for (const c of commits) {
-        const when = c.date ? c.date.slice(0, 10) : "";
-        sections.push(`- ${c.hash.slice(0, 7)} ${when} ${c.message}`);
-      }
-    }
+    // 2. Working memory (current task) — stale-flagged.
+    groups.push({
+      title: "Working Memory (current task, TODOs, branch)",
+      lines: this.recentByLayer(project, "working", limitPerLayer)
+        .filter((r) => fresh(r.content))
+        .map((r) => memLine(r, { flagStale: true })),
+    });
 
-    const active = this.activeFiles(project, 8);
-    if (active.length) {
-      sections.push(`\n## Recently Active Files (uncommitted work)`);
-      for (const a of active) {
-        const tag = a.event === "unlink" ? " (deleted)" : a.event === "add" ? " (new)" : "";
-        sections.push(`- ${a.path}${tag}`);
-      }
-    }
-
+    // 3. Last session (where we left off).
     const [lastSession] = this.listSessions(project, 1);
     if (lastSession) {
-      sections.push(`\n## Last Session`);
-      if (lastSession.title) sections.push(`**${lastSession.title}**`);
-      sections.push(lastSession.summary);
-      if (lastSession.next_steps) {
-        sections.push(`\n**Next steps:** ${lastSession.next_steps}`);
-      }
+      const lines = [lastSession.title ? `**${lastSession.title}**` : "", lastSession.summary].filter(Boolean);
+      if (lastSession.next_steps) lines.push(`**Next steps:** ${lastSession.next_steps}`);
+      groups.push({ title: "Last Session", lines });
     }
 
-    if (sections.length === 1) {
-      sections.push(
-        "\n_No memories stored yet for this project. Use save_memory / save_session to populate it._"
-      );
+    // 4. Long-term, 5. Session memory.
+    groups.push({
+      title: "Long-Term Memory (architecture, standards, stack)",
+      lines: this.recentByLayer(project, "long-term", limitPerLayer).filter((r) => fresh(r.content)).map((r) => memLine(r)),
+    });
+    groups.push({
+      title: "Session Memory (recent decisions, next steps)",
+      lines: this.recentByLayer(project, "session", limitPerLayer).filter((r) => fresh(r.content)).map((r) => memLine(r)),
+    });
+
+    // 6. Recent git changes.
+    const commits = this.recentCommits(project, 5);
+    if (commits.length) {
+      groups.push({
+        title: "Recent Changes (git)",
+        lines: commits.map((c) => `- ${c.hash.slice(0, 7)} ${c.date ? c.date.slice(0, 10) : ""} ${c.message}`),
+      });
     }
-    return sections.join("\n");
+
+    // 7. Recently active (uncommitted) files.
+    const active = this.activeFiles(project, 8);
+    if (active.length) {
+      groups.push({
+        title: "Recently Active Files (uncommitted work)",
+        lines: active.map((a) => {
+          const tag = a.event === "unlink" ? " (deleted)" : a.event === "add" ? " (new)" : "";
+          return `- ${a.path}${tag}`;
+        }),
+      });
+    }
+
+    // Assemble within the size budget; drop lowest-priority groups that don't fit.
+    const out: string[] = [`# Project Context: ${project}`];
+    let used = out[0].length;
+    let truncated = false;
+    for (const g of groups) {
+      if (!g.lines.length) continue;
+      const block = `\n## ${g.title}\n${g.lines.join("\n")}`;
+      if (used + block.length > maxChars) {
+        truncated = true;
+        break;
+      }
+      out.push(block);
+      used += block.length;
+    }
+    if (truncated) {
+      out.push(`\n_…trimmed to ~${maxChars} chars. Use search_memory or pass a query for more._`);
+    }
+    if (out.length === 1) {
+      out.push("\n_No memories stored yet for this project. Use save_memory / save_session to populate it._");
+    }
+    return out.join("\n");
   }
+}
+
+/** Days since an ISO/SQLite datetime (stored UTC), or Infinity if unparseable. */
+function ageDays(iso?: string): number {
+  if (!iso) return Infinity;
+  const t = Date.parse(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z");
+  if (Number.isNaN(t)) return Infinity;
+  return Math.floor((Date.now() - t) / 86_400_000);
+}
+
+/** Compact relative age label, e.g. "today", "3d", "2w", "4mo". */
+function formatAge(iso?: string): string {
+  const days = ageDays(iso);
+  if (!Number.isFinite(days)) return "";
+  if (days <= 0) return "today";
+  if (days === 1) return "1d";
+  if (days < 14) return `${days}d`;
+  if (days < 60) return `${Math.floor(days / 7)}w`;
+  return `${Math.floor(days / 30)}mo`;
 }
 
 /**

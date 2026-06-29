@@ -126,6 +126,17 @@ assert.match(packet, /Long-Term Memory/);
 assert.match(packet, /Most Relevant to: "login authentication"/);
 assert.match(packet, /JWT token auth/, "relevant section should surface the auth memory");
 
+// 7b. Phase 5 — freshness/stale flag, dedupe, and size cap.
+await store.saveMemory({ project, layer: "working", key: "current-task", content: "wiring oauth refresh" });
+// Backdate it 30 days to trigger the stale flag.
+db.prepare(`UPDATE memories SET updated_at = datetime('now','-30 days') WHERE project=? AND layer='working' AND key='current-task'`).run(project);
+const stalePacket = await store.buildContextPacket(project, 20);
+assert.match(stalePacket, /Working Memory/, "working memory section present");
+assert.match(stalePacket, /may be stale/, "30-day-old working memory is flagged stale");
+const capped = await store.buildContextPacket(project, 20, undefined, 200);
+assert.ok(capped.length < 600, "size cap keeps the packet small");
+assert.match(capped, /trimmed to ~200 chars/, "truncation is disclosed");
+
 // 8. cross-project isolation
 const empty = await store.buildContextPacket("other-project", 20);
 assert.match(empty, /No memories stored yet/);
