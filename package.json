@@ -1,6 +1,6 @@
 {
   "name": "uace-mcp",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Universal AI Context Engine — local-first shared project memory served to any MCP-capable AI assistant.",
   "type": "module",
   "license": "MIT",
