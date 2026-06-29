@@ -10,8 +10,8 @@ applied to the docs.
 |---|---|---|
 | 0 | Branch `feat/uace-autonomy` + scaffolding | TODO |
 | — | Spike: confirm Antigravity `mcp_config.json` path on machine (R5) | DONE — `~/.gemini/antigravity/mcp_config.json`; std stdio schema; preserve `$typeName`; file holds secrets |
-| 1 | Server CLI mode (`src/cli.ts`: context [no-embed default] / save-session / sync) + extract transcript helpers | TODO |
-| 1 | Smoke: CLI round-trip + stdout purity (T1, T2, T9b) | TODO |
+| 1 | Server CLI mode (`src/cli.ts`: context [no-embed default] / save-session / sync) + extract transcript helpers | DONE — commit `f50305c` |
+| 1 | Smoke: CLI round-trip + stdout purity (T1, T2, T9b) | DONE — `scripts/smoke-cli.ts` |
 | 2 | `hostIntegration.ts` host detection + MCP auto-register (Cursor API; Claude `.mcp.json` via `npx`; Antigravity atomic merge of `~/.gemini/antigravity/mcp_config.json`) | TODO |
 | 2 | JSON merge helper + idempotency tests (T3) | TODO |
 | 3a | `writeRules` (AGENTS.md + .cursor/rules + copilot-instructions, block-merge) | TODO |
