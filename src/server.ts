@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { openDb, tryEnableVectors } from "./db.js";
@@ -297,6 +298,8 @@ server.registerTool(
         files: s.files,
         source: s.source,
         externalId: s.externalId,
+        decisions: s.decisions,
+        nextSteps: s.nextSteps,
       });
       if (isNew) created++;
     }
@@ -368,6 +371,56 @@ server.registerTool(
       `Deleted project "${project}" (${n.memories} memories, ${n.sessions} sessions, ${n.files} files, ${n.commits} commits).`
     );
   }
+);
+
+// --- MCP prompts: one-click flows for any MCP client (complements hooks/rules) ---
+
+server.registerPrompt(
+  "continue-project",
+  {
+    title: "Continue Project",
+    description: "Load this project's UACE memory and continue where the last session left off.",
+    argsSchema: { project: z.string().describe("Project name (usually the workspace folder name).") },
+  },
+  ({ project }) => ({
+    messages: [
+      {
+        role: "user",
+        content: {
+          type: "text",
+          text:
+            `Continue project "${project}" using the uace MCP server. First call get_project_context for ` +
+            `"${project}" to load prior decisions, the current task, recent changes, and where the last ` +
+            `session left off. Then summarize the state and ask what to work on next — without making me ` +
+            `re-explain the project.`,
+        },
+      },
+    ],
+  })
+);
+
+server.registerPrompt(
+  "save-checkpoint",
+  {
+    title: "Save Checkpoint",
+    description: "Persist a session checkpoint to UACE so any tool can continue later.",
+    argsSchema: { project: z.string().describe("Project name (usually the workspace folder name).") },
+  },
+  ({ project }) => ({
+    messages: [
+      {
+        role: "user",
+        content: {
+          type: "text",
+          text:
+            `Save a UACE checkpoint for project "${project}". Call save_session with a concise summary of ` +
+            `what we did, the key decisions, the files touched, and concrete next steps. Also call ` +
+            `save_memory for any durable architecture/standards (layer long-term) or current-task notes ` +
+            `(layer working) worth keeping.`,
+        },
+      },
+    ],
+  })
 );
 
 async function shutdown(): Promise<void> {

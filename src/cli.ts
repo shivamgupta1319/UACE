@@ -125,6 +125,8 @@ async function cmdSaveSession(flags: Flags): Promise<number> {
       files: parsed.files,
       source: parsed.source,
       externalId: parsed.externalId,
+      decisions: parsed.decisions,
+      nextSteps: parsed.nextSteps,
     });
     log(created ? `Saved session #${row.id} for "${project}".` : `Session already known (#${row.id}).`);
     return 0;
@@ -168,6 +170,8 @@ async function cmdSync(flags: Flags): Promise<number> {
       files: s.files,
       source: s.source,
       externalId: s.externalId,
+      decisions: s.decisions,
+      nextSteps: s.nextSteps,
     });
     if (created) newSessions++;
   }

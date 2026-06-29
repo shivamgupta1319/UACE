@@ -9,6 +9,9 @@ export interface ParsedSession {
   prompt: string;
   files: string[];
   source: string;
+  decisions?: string; // heuristic decisions extracted from assistant turns
+  nextSteps?: string; // heuristic next-steps / TODOs
+  lastMessage?: string; // last assistant message — "where we left off"
 }
 
 /**
@@ -31,6 +34,19 @@ function extractText(content: unknown): string {
       .trim();
   }
   return "";
+}
+
+const DECISION_RE = /\b(decided|decision|we chose|i chose|going with|the approach is|agreed to)\b/i;
+const NEXT_RE = /\b(next step|next:|todo|to-?do|still need|remaining|follow-?up|then we|next we)\b/i;
+
+/** Pull short, salient lines from assistant prose for the decisions/next-steps fields. */
+function collectSignals(text: string, decisions: string[], next: string[]): void {
+  for (const rawLine of text.split(/\n+/)) {
+    const line = rawLine.replace(/^[\s>*\-•\d.]+/, "").trim();
+    if (line.length < 8 || line.length > 200) continue;
+    if (decisions.length < 4 && DECISION_RE.test(line)) decisions.push(line);
+    else if (next.length < 4 && NEXT_RE.test(line)) next.push(line);
+  }
 }
 
 function collectFiles(content: unknown, into: Set<string>): void {
@@ -86,7 +102,10 @@ export async function parseTranscript(
 ): Promise<ParsedSession | null> {
   const raw = await readFile(file, "utf8");
   const files = new Set<string>();
+  const decisions: string[] = [];
+  const nextSteps: string[] = [];
   let firstPrompt = "";
+  let lastAssistant = "";
   let userTurns = 0;
   let assistantTurns = 0;
 
@@ -106,6 +125,11 @@ export async function parseTranscript(
     } else if (obj.type === "assistant") {
       assistantTurns++;
       collectFiles(content, files);
+      const text = extractText(content);
+      if (text) {
+        lastAssistant = text;
+        collectSignals(text, decisions, nextSteps);
+      }
     }
   }
 
@@ -113,11 +137,13 @@ export async function parseTranscript(
 
   const fileList = [...files];
   const promptShort = firstPrompt.replace(/\s+/g, " ").slice(0, 200);
+  const leftOff = lastAssistant.replace(/\s+/g, " ").trim().slice(0, 280);
   const title = promptShort ? promptShort.slice(0, 80) : `Claude session ${externalId.slice(0, 8)}`;
   const summary =
     `${userTurns} prompts / ${assistantTurns} replies.` +
     (promptShort ? ` First ask: "${promptShort}".` : "") +
-    (fileList.length ? ` Files touched: ${fileList.slice(0, 12).join(", ")}.` : "");
+    (fileList.length ? ` Files touched: ${fileList.slice(0, 12).join(", ")}.` : "") +
+    (leftOff ? ` Left off: "${leftOff}".` : "");
 
   return {
     externalId,
@@ -126,5 +152,8 @@ export async function parseTranscript(
     prompt: promptShort,
     files: fileList,
     source: "claude-code-transcript",
+    decisions: decisions.length ? decisions.join("; ") : undefined,
+    nextSteps: nextSteps.length ? nextSteps.join("; ") : undefined,
+    lastMessage: leftOff || undefined,
   };
 }

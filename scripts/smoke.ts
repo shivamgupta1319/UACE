@@ -181,6 +181,17 @@ writeFileSync(
         ],
       },
     }),
+    JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [
+          {
+            type: "text",
+            text: "We decided to use JWT for sessions.\nNext step: wire the refresh-token endpoint.",
+          },
+        ],
+      },
+    }),
   ].join("\n")
 );
 const parsed = await importClaudeSessions(projPath);
@@ -189,6 +200,11 @@ assert.equal(parsed.length, 1, "should parse one transcript");
 assert.match(parsed[0].summary, /auth login module/, "summary captures the opening prompt");
 assert.ok(parsed[0].files.includes(`${projPath}/auth.ts`), "should capture files touched");
 assert.equal(parsed[0].source, "claude-code-transcript");
+// Phase 4 — richer capture: decisions, next steps, and "where we left off".
+assert.match(parsed[0].decisions ?? "", /JWT/, "should extract a decision line");
+assert.match(parsed[0].nextSteps ?? "", /refresh-token/, "should extract a next-step line");
+assert.match(parsed[0].lastMessage ?? "", /refresh-token endpoint/, "lastMessage = where we left off");
+assert.match(parsed[0].summary, /Left off:/, "summary includes where we left off");
 
 // 13. DELETE — memory delete also purges its embedding (no orphan vector)
 const vecCount = (id: number): number =>
