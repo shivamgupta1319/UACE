@@ -1,0 +1,11 @@
+{
+  "features": [
+    {
+      "id": "FEAT-001",
+      "title": "UACE Autonomy + Useful-Brain Overhaul",
+      "status": "DOCS_REVIEWED",
+      "createdAt": "2026-06-29T06:50:17Z",
+      "path": "docs/features/uace-autonomy"
+    }
+  ]
+}
